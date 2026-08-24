@@ -25,7 +25,7 @@ const defaults={
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV611')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerV612')||'null');
 if(!state){
   const previousKeys=['mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
   for(const key of previousKeys){
@@ -76,7 +76,7 @@ migrateV69();
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV611',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV612',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -490,6 +490,33 @@ function analytics(){
   const processArea=state.zones.filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)+state.objects.filter(o=>o.type==='process').reduce((s,o)=>s+area(o),0);
   const supportArea=state.zones.filter(z=>z.type!=='process'&&z.type!=='storage').reduce((s,z)=>s+netArea(z),0)+state.objects.filter(o=>o.type!=='process'&&o.type!=='storage').reduce((s,o)=>s+area(o),0);
   return {rp,vol,cap100,cap,pm,cams,totalCams:cams.cams.length+other,area:state.roomL*state.roomW,storageArea:estimatedRackableArea(),processArea,supportArea,currentFOT,autoFOT,currentOpex:currentFOT+state.rent,autoOpex:autoFOT+state.rent,userCams};
+}
+
+
+function clientToModel(e,svg,ox,oy,sc){
+  const r=svg.getBoundingClientRect();
+  const sx=1000/r.width;
+  const sy=590/r.height;
+  return {
+    x:((e.clientX-r.left)*sx-ox)/sc,
+    y:((e.clientY-r.top)*sy-oy)/sc
+  };
+}
+
+function findEntityAtPoint(pt){
+  for(let i=(state.objects||[]).length-1;i>=0;i--){
+    if(pointInRect(pt,state.objects[i])) return {kind:'object',index:i};
+  }
+  for(let i=(state.columns||[]).length-1;i>=0;i--){
+    if(pointInRect(pt,state.columns[i])) return {kind:'column',index:i};
+  }
+
+  const candidates=(state.zones||[])
+    .map((z,index)=>({z,index,a:area(z)}))
+    .filter(x=>x.z.name!=='Хранение' && pointInRect(pt,x.z))
+    .sort((a,b)=>a.a-b.a);
+
+  return candidates.length ? {kind:'zone',index:candidates[0].index} : null;
 }
 
 function draw(){
