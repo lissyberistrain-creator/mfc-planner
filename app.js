@@ -25,7 +25,7 @@ const defaults={
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV612')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerV613')||'null');
 if(!state){
   const previousKeys=['mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
   for(const key of previousKeys){
@@ -76,7 +76,7 @@ migrateV69();
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV612',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV613',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -174,6 +174,35 @@ function centerCentralAisle(){
   }
 }
 
+
+function syncCentralAisleToRackOrientation(){
+  const central=getZone('Центральный проход');
+  if(!central) return;
+
+  // Сначала смотрим ориентацию рядов без учёта того, как сейчас повернут ЦП.
+  const plan=freeRackPlan();
+  const candidate=rackCandidateArea();
+  const thickness=clamp(Number(state.centralAisle)||1.6,1.2,2.6);
+
+  if(plan.orientation==='horizontal'){
+    // Горизонтальные стеллажи => вертикальный ЦП.
+    central.rotation=90;
+    central.w=thickness;
+    central.h=candidate.h;
+    central.x=candidate.x+candidate.w/2-central.w/2;
+    central.y=candidate.y;
+  }else{
+    // Вертикальные стеллажи => горизонтальный ЦП.
+    central.rotation=0;
+    central.w=candidate.w;
+    central.h=thickness;
+    central.x=candidate.x;
+    central.y=candidate.y+candidate.h/2-central.h/2;
+  }
+
+  normalizeSystemZones();
+}
+
 function optimize(){
   const L=state.roomL,W=state.roomW;
 
@@ -223,6 +252,7 @@ function optimize(){
   ];
 
   normalizeSystemZones();
+  syncCentralAisleToRackOrientation();
   renderAll();
 }
 
@@ -367,7 +397,51 @@ function rackLayoutForBlock(b,orientation){
   }
 }
 function rackPlan(){
-  return freeRackPlan();
+  const central=getZone('Центральный проход');
+  const candidate=rackCandidateArea();
+  const thickness=clamp(Number(state.centralAisle)||1.6,1.2,2.6);
+
+  if(!central) return freeRackPlan();
+
+  // Сохраняем текущую геометрию ЦП.
+  const backup={...central};
+
+  // Вариант A: горизонтальные ряды, ЦП вертикальный.
+  central.rotation=90;
+  central.w=thickness;
+  central.h=candidate.h;
+  central.x=candidate.x+candidate.w/2-central.w/2;
+  central.y=candidate.y;
+  const horizontal=buildFreeRackPlan('horizontal');
+
+  // Вариант B: вертикальные ряды, ЦП горизонтальный.
+  central.rotation=0;
+  central.w=candidate.w;
+  central.h=thickness;
+  central.x=candidate.x;
+  central.y=candidate.y+candidate.h/2-central.h/2;
+  const vertical=buildFreeRackPlan('vertical');
+
+  // Выбираем вариант с большим количеством секций.
+  const best=vertical.total>horizontal.total?vertical:horizontal;
+
+  // Возвращаем ЦП в геометрию, соответствующую победившей ориентации.
+  if(best.orientation==='horizontal'){
+    central.rotation=90;
+    central.w=thickness;
+    central.h=candidate.h;
+    central.x=candidate.x+candidate.w/2-central.w/2;
+    central.y=candidate.y;
+  }else{
+    central.rotation=0;
+    central.w=candidate.w;
+    central.h=thickness;
+    central.x=candidate.x;
+    central.y=candidate.y+candidate.h/2-central.h/2;
+  }
+
+  state.centralAisle=thickness;
+  return best;
 }
 
 function processModel(flow){
@@ -713,8 +787,7 @@ function draw(){
     }
   };
 
-  $('layoutSummary').textContent=
-    `Единая свободная площадь · секций ${a.rp.total} · занято стеллажами ${fmt1(rackUsedArea())} м² · свободный остаток ${fmt1(unusedRackableArea())} м² · камеры ${a.totalCams}`;
+  $('layoutSummary').textContent=`Единая свободная площадь · секций ${a.rp.total} · улиц ${a.cams.streets||0} · камер на склад ${a.cams.cams.length} · ЦП ${centralIsVertical()?'вертикальный':'горизонтальный'} · свободный остаток ${fmt1(unusedRackableArea())} м²`;
 }
 function renderSelected(){
   const box=$('selectedEditor');
