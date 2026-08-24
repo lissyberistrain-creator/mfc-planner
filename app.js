@@ -25,11 +25,44 @@ const defaults={
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV69')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerV610')||'null');
 if(!state){
-  state=JSON.parse(localStorage.getItem('mfcPlannerV5')||'null')||structuredClone(defaults);
+  const previousKeys=['mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
+  for(const key of previousKeys){
+    try{
+      const candidate=JSON.parse(localStorage.getItem(key)||'null');
+      if(candidate){ state=candidate; break; }
+    }catch(e){}
+  }
 }
+if(!state) state=structuredClone(defaults);
 for(const k in defaults){if(state[k]===undefined) state[k]=structuredClone(defaults[k]);}
+
+
+function sanitizeState(){
+  const numericKeys=[
+    'roomL','roomW','roomH','avgSkuL','targetFlow','simFlow','centralAisle',
+    'rackL','rackD','rackH','shelves','aisle','fillPct',
+    'normAccept','normPutaway','normPick','normShip',
+    'opsPerShift','shiftsPerDay','paidHours','opRate',
+    'seniors','seniorSalary','managers','managerSalary',
+    'cameraRange','coverageStep','avgFlow','maxFlow',
+    'fixedPC','fixedTsd','fixedTablet','rent','capex'
+  ];
+  numericKeys.forEach(k=>{
+    const v=Number(state[k]);
+    if(state[k]===null || state[k]==='' || !Number.isFinite(v)){
+      state[k]=defaults[k];
+    }else{
+      state[k]=v;
+    }
+  });
+  if(!state.layoutMode) state.layoutMode=defaults.layoutMode;
+  if(!Array.isArray(state.zones)) state.zones=[];
+  if(!Array.isArray(state.columns)) state.columns=[];
+  if(!Array.isArray(state.objects)) state.objects=[];
+}
+sanitizeState();
 
 function migrateV69(){
   // Сборка в этом проекте находится на мезонине и не должна занимать площадь 1 этажа.
@@ -43,7 +76,7 @@ migrateV69();
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV69',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV610',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -728,18 +761,18 @@ function renderTabs(){
   $('tab-equip').innerHTML=`<div class="cards3">${metric('Пользовательские объекты',state.objects.length)}${metric('Колонны',state.columns.length)}${metric('Оборудование',state.objects.filter(o=>o.type==='equipment').length)}</div>
   <table class="tbl"><tr><th>Объект</th><th>Количество</th><th>Комментарий</th></tr>${tr('Стационарные ПК',state.fixedPC||2,'базовая модель')}${tr('ТСД',state.fixedTsd||3,'базовая модель')}${tr('Планшеты',state.fixedTablet||2,'базовая модель')}${tr('Столы, двери, кастомные зоны',state.objects.length,'созданы через библиотеку')}</table>`;
 
-  const route='Сборка на мезонине';,p2={x:pick.x+pick.w/2,y:pick.y+pick.h/2};route=fmt1(Math.hypot(p1.x-p2.x,p1.y-p2.y))+' м'}
+  const route='Сборка на мезонине';
   $('tab-analytics').innerHTML=`<div class="cards3">${metric('ФОТ текущий',money(a.currentFOT))}${metric('ФОТ с автоштатом',money(a.autoFOT))}${metric('OPEX с арендой',money(a.currentOpex))}</div>
   <table class="tbl"><tr><th>Аналитика</th><th>Значение</th></tr>${tr('Доля площади, занятой стеллажами',fmt1(a.rackUsedArea/a.area*100)+'%')}
     ${tr('Неиспользуемая доступная площадь',fmt1(a.unusedRackableArea)+' м²')}${tr('Доля процессных зон',fmt1(a.processArea/a.area*100)+'%')}${tr('Доля staff/service',fmt1(a.supportArea/a.area*100)+'%')}${tr('Секций на 1 м²',fmt1(a.rp.total/a.area))}
-    ${tr('Алгоритм размещения стеллажей','автозаполнение всей свободной рабочей площади')}${tr('SKU на 1 м²',fmt1(a.cap/a.area))}${tr('Путь центра хранения до сборки',route)}${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' SKU/мес')}${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' SKU/мес')}${tr('CAPEX',money(state.capex||2921881))}${tr('Аренда',money(state.rent||300000))}</table>`;
+    ${tr('Алгоритм размещения стеллажей','автозаполнение всей свободной рабочей площади')}${tr('SKU на 1 м²',fmt1(a.cap/a.area))}${tr('Сборка',route+' · площадь 1 этажа не занимает')}${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' SKU/мес')}${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' SKU/мес')}${tr('CAPEX',money(state.capex||2921881))}${tr('Аренда',money(state.rent||300000))}</table>`;
 
-  const warns=[],storage=getZone('Хранение'),central=getZone('Центральный проход');
+  const warns=[],central=getZone('Центральный проход');
   if(central&&central.h<1.2)warns.push(['bad','Центральный проход меньше 1,2 м.']);
   if(state.aisle<1)warns.push(['bad','Проход между стеллажными рядами меньше 1 м.']);
   if(a.cams.uncovered.length)warns.push(['bad',`Есть ${a.cams.uncovered.length} контрольных точек без покрытия камер.`]);else warns.push(['good','Мёртвых зон по модели камер нет.']);
   if(pm.util>1)warns.push(['bad',`Целевой поток ${fmt(state.targetFlow)} SKU/мес выше мощности текущей команды.`]);
-  if(storage&&central&&!rectsOverlap(storage,central))warns.push(['bad','Центральный проход находится вне зоны хранения.']);
+  if(central){const rc=rackCandidateArea();if(!rectsOverlap(rc,central))warns.push(['bad','Центральный проход находится вне рабочей складской площади.']);}
   if(storage&&central&&Math.abs((central.y+central.h/2)-(storage.y+storage.h/2))>storage.h*.18)warns.push(['info','Центральный проход смещён от центра. Проверь путь сборщика.']);
   state.objects.filter(o=>o.affectsCapacity&&storage&&rectsOverlap(storage,o)).forEach(o=>warns.push(['info',`${o.name} занимает часть зоны хранения.`]));
   warns.push(['info','Добавленные объекты можно двигать, менять по размеру, поворачивать, копировать и удалять.']);
