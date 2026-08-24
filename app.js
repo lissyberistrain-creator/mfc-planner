@@ -1,3 +1,15 @@
+
+window.addEventListener('error',e=>{
+  console.error(e.error||e.message);
+  let box=document.getElementById('runtimeError');
+  if(!box){
+    box=document.createElement('div');
+    box.id='runtimeError';
+    box.style.cssText='position:fixed;left:16px;bottom:16px;z-index:9999;background:#7c2139;color:#fff;padding:10px 14px;border-radius:10px;font:12px Segoe UI,Arial;max-width:520px;box-shadow:0 4px 18px rgba(0,0,0,.25)';
+    document.body.appendChild(box);
+  }
+  box.textContent='Ошибка интерфейса: '+(e.message||'неизвестная ошибка');
+});
 const $=id=>document.getElementById(id);
 const fmt=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}).format(Math.round(Number(n)||0));
 const fmt1=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1}).format(Number(n)||0);
@@ -12,12 +24,15 @@ const defaults={
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV5')||'null')||structuredClone(defaults);
+let state=JSON.parse(localStorage.getItem('mfcPlannerV61')||'null');
+if(!state){
+  state=JSON.parse(localStorage.getItem('mfcPlannerV5')||'null')||structuredClone(defaults);
+}
 for(const k in defaults){if(state[k]===undefined) state[k]=structuredClone(defaults[k]);}
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV5',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV61',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -25,6 +40,15 @@ function getZone(n){return state.zones.find(z=>z.name===n)}
 function area(r){return Math.max(0,r.w*r.h)}
 function colAreaIn(r){return state.columns.reduce((s,c)=>{if(!rectsOverlap(r,c))return s;const x1=Math.max(r.x,c.x),x2=Math.min(r.x+r.w,c.x+c.w),y1=Math.max(r.y,c.y),y2=Math.min(r.y+r.h,c.y+c.h);return s+Math.max(0,x2-x1)*Math.max(0,y2-y1)},0)}
 function netArea(r){return Math.max(0,area(r)-colAreaIn(r))}
+function selectedArray(){
+  if(selected.kind==='zone') return state.zones;
+  if(selected.kind==='column') return state.columns;
+  if(selected.kind==='object') return state.objects;
+  return [];
+}
+function objectColor(o){
+  return o.color || colors[o.type] || colors.custom || '#d8d8e8';
+}
 
 function initZones(){
   const L=state.roomL,W=state.roomW;
