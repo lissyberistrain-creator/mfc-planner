@@ -428,20 +428,38 @@ function buildFreeRackPlan(orientation){
   const blockers=rackBlockers();
   const racks=[];
 
+  // Новая складская логика:
+  // одна улица = стеллаж + рабочий проход + стеллаж.
+  // Сотрудник работает между двумя рядами, как на реальном складе.
+  const rackDepth = state.rackD;
+  const aisle = state.aisle;
+  const streetPitch = rackDepth * 2 + aisle;
+
   if(orientation==='horizontal'){
-    const rowPitch=state.rackD+state.aisle;
-    for(let y=area.y; y+state.rackD<=area.y+area.h+1e-9; y+=rowPitch){
-      for(let x=area.x; x+state.rackL<=area.x+area.w+1e-9; x+=state.rackL){
-        const r={x,y,w:state.rackL,h:state.rackD};
-        if(rackCellAllowed(r,blockers)) racks.push(r);
+    for(let y=area.y; y+streetPitch<=area.y+area.h+1e-9; y+=streetPitch){
+      const leftRow={y:y, h:rackDepth};
+      const rowPositions=[
+        y,
+        y+rackDepth+aisle
+      ];
+      for(const ry of rowPositions){
+        for(let x=area.x; x+state.rackL<=area.x+area.w+1e-9; x+=state.rackL){
+          const r={x,y:ry,w:state.rackL,h:rackDepth};
+          if(rackCellAllowed(r,blockers)) racks.push(r);
+        }
       }
     }
   }else{
-    const colPitch=state.rackD+state.aisle;
-    for(let x=area.x; x+state.rackD<=area.x+area.w+1e-9; x+=colPitch){
-      for(let y=area.y; y+state.rackL<=area.y+area.h+1e-9; y+=state.rackL){
-        const r={x,y,w:state.rackD,h:state.rackL};
-        if(rackCellAllowed(r,blockers)) racks.push(r);
+    for(let x=area.x; x+streetPitch<=area.x+area.w+1e-9; x+=streetPitch){
+      const colPositions=[
+        x,
+        x+rackDepth+aisle
+      ];
+      for(const cx of colPositions){
+        for(let y=area.y; y+state.rackL<=area.y+area.h+1e-9; y+=state.rackL){
+          const r={x:cx,y,w:rackDepth,h:state.rackL};
+          if(rackCellAllowed(r,blockers)) racks.push(r);
+        }
       }
     }
   }
