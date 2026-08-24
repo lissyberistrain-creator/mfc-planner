@@ -1,0 +1,62 @@
+*{box-sizing:border-box}body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:#f6f3f8;color:#281d33}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 24px;background:linear-gradient(110deg,#2c1845,#5f2f8f 60%,#92468e);color:#fff;position:sticky;top:0;z-index:5}
+.brand{font-size:24px;font-weight:800}.ver{font-size:12px;background:rgba(255,255,255,.18);padding:3px 7px;border-radius:999px}.sub{font-size:12px;opacity:.85}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.btn{border:0;border-radius:10px;padding:9px 14px;font-weight:700;background:rgba(255,255,255,.16);color:#fff;cursor:pointer}.btn.primary{background:#fff;color:#5f2f8f}.btn.danger{background:#fff;color:#a53d58}.wide{width:100%}.filebtn input{display:none}
+.layout{display:grid;grid-template-columns:390px 1fr}.sidebar{padding:16px;background:#faf8fc;border-right:1px solid #e8dff0}.main{padding:18px;min-width:0}
+.panel{background:#fff;border:1px solid #e9e1ef;border-radius:16px;padding:14px;margin-bottom:14px;box-shadow:0 4px 16px rgba(65,31,92,.05)}.emphasis{background:linear-gradient(160deg,#fff,#faf5ff)}
+h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}label{font-size:12px;font-weight:700;color:#746a7f;display:flex;flex-direction:column;gap:5px}input,select{border:1px solid #ddd2e7;border-radius:10px;padding:8px;background:#fff}.hint{font-size:12px;color:#776d82}
+.hero{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}.card{background:#fff;border:1px solid #e9e1ef;border-radius:16px;padding:16px}.card span{display:block;font-size:12px;color:#776d82}.card b{display:block;margin-top:8px;font-size:21px;color:#552d81}
+.rowhead,.headrow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#776d82}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}.dot.storage{background:#d8bdf0}.dot.process{background:#f4c2dc}.dot.staff{background:#c7d5ef}.dot.service{background:#d5ddcf}.dot.column{background:#6d6d75}.dot.cam{background:#3f2463}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}.tool,.mini{border:0;border-radius:9px;padding:7px 10px;background:#f1e8fa;color:#5f2f8f;font-weight:700;cursor:pointer}.tool.active{background:#5f2f8f;color:#fff}
+.canvaswrap{background:#fcfbfd;border:1px dashed #dacfe6;border-radius:14px;padding:8px}#plan{width:100%;height:590px;display:block}.room{fill:#fff;stroke:#2b1b38;stroke-width:3}.grid{stroke:#eee7f5;stroke-width:1}.zone{stroke:#fff;stroke-width:2}.selected{stroke:#25132f!important;stroke-width:4!important}.label{font-size:13px;font-weight:800;fill:#271b33}.sub{font-size:10px;fill:#52465d}.rack{fill:#553573}.column{fill:#666874;stroke:#fff;stroke-width:1}.cam{fill:#3f2463;stroke:#fff}.camarc{fill:none;stroke:#3f2463;stroke-width:1.5}.dead{fill:#d53b68}.handle{fill:#fff;stroke:#2b1b38;stroke-width:2}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid #e9e1ef;padding-bottom:10px}.tab{border:0;border-radius:10px;padding:9px 12px;background:#f1ebf8;color:#674d82;font-weight:700}.tab.active{background:#613694;color:#fff}.tabcontent{display:none;padding-top:14px}.tabcontent.active{display:block}
+.cards3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.metricrow{background:#fcfbfd;border:1px solid #e9e1ef;border-radius:12px;padding:12px}.metricrow span{font-size:12px;color:#776d82}.metricrow b{display:block;font-size:20px;color:#5a3185;margin-top:5px}.tbl{width:100%;border-collapse:collapse}.tbl td,.tbl th{padding:10px;border-bottom:1px solid #ece4f2;text-align:left}
+.emugrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.emukpi{background:#fcfbfd;border:1px solid #e9e1ef;border-radius:14px;padding:14px}.emukpi span{font-size:12px;color:#776d82}.emukpi b{display:block;font-size:20px;color:#4f2c77;margin-top:6px}.lineflow{display:flex;justify-content:center;gap:12px;padding:14px;font-weight:800;color:#62399a}.goodbg{background:#eaf8ef}.badbg{background:#faecef}
+.warnbox{padding:10px 12px;border-radius:10px;border:1px solid #e6dcec;margin-top:10px}.warnbox.good{background:#eaf8ef}.warnbox.bad{background:#faecef}.warnbox.info{background:#f3eef9}
+.colitem{border:1px solid #ece3f2;border-radius:12px;padding:9px;margin-bottom:8px;background:#fcfbfd}.delbtn{border:0;background:#fae8ee;color:#a63e5a;border-radius:8px;padding:3px 7px}.selected-editor{min-height:90px}.selname{font-weight:800;margin-bottom:8px}
+.simlbl{width:240px}
+@media(max-width:1350px){.layout{grid-template-columns:1fr}.hero{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:760px){.topbar{flex-direction:column;align-items:flex-start}.hero,.emugrid,.cards3{grid-template-columns:1fr}.grid2{grid-template-columns:1fr 1fr}#plan{height:430px}}
+
+.object-buttons{display:grid;grid-template-columns:1fr 1fr;gap:7px}.objbtn{border:0;border-radius:9px;padding:7px 10px;background:#f1e8fa;color:#5f2f8f;font-weight:700;cursor:pointer;text-align:left;font-size:12px}
+.actiontool{background:#eee7f7}.dangerTool{background:#fae8ee!important;color:#a63e5a!important}
+.toggles{display:grid;gap:6px;margin-top:8px}.toggles label{display:flex;flex-direction:row;align-items:center;gap:6px}.toggles input{width:auto}
+.metricrow small{display:block;margin-top:4px;color:#776d82}
+
+.btn.secondary{margin-top:8px;background:#efe7f7;color:#5f2f8f;border:1px solid #dfd0ed}
+
+.storageBoundary{fill:transparent;stroke:#aa8dc6;stroke-width:2;stroke-dasharray:8 6}
+.rackableBg{fill:#eadcf7;opacity:.45;stroke:none}
+.unusedCell{fill:#f5effa;opacity:.7;stroke:#eee5f4;stroke-width:.3}
+
+
+/* v6.8: визуальные слои не должны перехватывать клики по объектам */
+.grid,
+.rack,
+.rackableBg,
+.unusedCell,
+.cam,
+.camarc,
+.dead {
+  pointer-events: none;
+}
+
+.obj {
+  pointer-events: all;
+  cursor: grab;
+}
+
+.obj:active {
+  cursor: grabbing;
+}
+
+.handle {
+  pointer-events: all;
+  cursor: nwse-resize;
+}
+
+/* Интерактивные объекты всегда визуально выше фоновой аналитики */
+.obj .zone,
+.obj .column {
+  pointer-events: all;
+}
