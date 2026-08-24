@@ -74,3 +74,7 @@ h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9
 }
 .rack{pointer-events:none}
 .cam,.camarc,.dead,.grid{pointer-events:none}
+
+.variant{padding:10px;margin-top:8px;border:1px solid #ddd;border-radius:8px}
+.variant.best{border-color:#5a9;background:#eefaf0}
+.btn.small{padding:4px 8px;margin-top:6px}

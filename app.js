@@ -203,6 +203,74 @@ function syncCentralAisleToRackOrientation(){
   normalizeSystemZones();
 }
 
+
+function optimizerVariants(){
+  const backup={
+    layoutMode:state.layoutMode,
+    centralAisle:state.centralAisle,
+    targetFlow:state.targetFlow
+  };
+
+  const modes=[
+    {id:'capacity',name:'Максимум хранения'},
+    {id:'balanced',name:'Баланс'},
+    {id:'flow',name:'Максимальный поток'}
+  ];
+
+  const result=[];
+
+  modes.forEach(m=>{
+    state.layoutMode=m.id;
+    optimize();
+    const a=analytics();
+    const pm=processModel(a.cap);
+
+    result.push({
+      id:m.id,
+      name:m.name,
+      sections:a.rp.total,
+      sku:a.cap,
+      cams:a.totalCams,
+      staff:pm.rec,
+      area: a.rackUsedArea||0,
+      score:
+        m.id==='capacity' ? a.cap*1.0 :
+        m.id==='flow' ? a.cap*.75+pm.maxMonthly*.001 :
+        a.cap*.9+pm.maxMonthly*.0005
+    });
+  });
+
+  state.layoutMode=backup.layoutMode;
+  state.centralAisle=backup.centralAisle;
+  state.targetFlow=backup.targetFlow;
+
+  result.sort((a,b)=>b.score-a.score);
+  window.optimizerResults=result;
+  renderOptimizerResults();
+
+  return result[0];
+}
+
+function renderOptimizerResults(){
+  const box=$('optimizerResults');
+  if(!box || !window.optimizerResults)return;
+
+  box.innerHTML=window.optimizerResults.map((v,i)=>
+    `<div class="variant ${i===0?'best':''}">
+      <b>${i+1}. ${v.name}</b><br>
+      Секции: ${fmt(v.sections)} · SKU: ${fmt(v.sku)}<br>
+      Камеры: ${fmt(v.cams)} · Персонал: ${fmt(v.staff)}<br>
+      <button class="btn small" onclick="applyOptimizerVariant('${v.id}')">Применить</button>
+    </div>`
+  ).join('');
+}
+
+function applyOptimizerVariant(id){
+  state.layoutMode=id;
+  optimize();
+  renderAll();
+}
+
 function optimize(){
   const L=state.roomL,W=state.roomW;
 
@@ -997,7 +1065,8 @@ inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id
   }
 }renderAll()}});
 $('layoutMode').value=state.layoutMode;$('layoutMode').onchange=()=>{state.layoutMode=$('layoutMode').value;renderAll()};
-$('optBtn').onclick=optimize;$('optSideBtn').onclick=optimize;$('centerAisleBtn').onclick=()=>{centerCentralAisle();renderAll();};
+$('optBtn').onclick=()=>{optimizerVariants();};$('optSideBtn').onclick=()=>{optimizerVariants();};
+$('runOptimizerBtn').onclick=()=>{optimizerVariants();};$('centerAisleBtn').onclick=()=>{centerCentralAisle();renderAll();};
 $('addColumnBtn').onclick=()=>{state.columns.push({x:6,y:3,w:.6,h:.6,rotation:0});selected={kind:'column',index:state.columns.length-1};renderAll()};
 document.querySelectorAll('.objbtn').forEach(b=>b.onclick=()=>addTemplate(b.dataset.template));
 $('rotateBtn').onclick=()=>rotateSelected();$('cloneBtn').onclick=()=>cloneSelected();$('deleteBtn').onclick=()=>deleteSelected();
