@@ -229,14 +229,14 @@ function optimizerVariants(){
       id:m.id,
       name:m.name,
       sections:a.rp.total,
-      sku:a.cap,
+      shk:a.cap,
       cams:a.totalCams,
       staff:pm.rec,
       area: a.rackUsedArea||0,
       score:
         m.id==='capacity' ? a.cap*1.0 :
-        m.id==='flow' ? a.cap*.75+pm.maxMonthly*.001 :
-        a.cap*.9+pm.maxMonthly*.0005
+        m.id==='flow' ? a.cap*.65+pm.maxMonthly*.001 :
+        a.cap*.85+pm.maxMonthly*.0005
     });
   });
 
@@ -258,8 +258,9 @@ function renderOptimizerResults(){
   box.innerHTML=window.optimizerResults.map((v,i)=>
     `<div class="variant ${i===0?'best':''}">
       <b>${i+1}. ${v.name}</b><br>
-      Секции: ${fmt(v.sections)} · SKU: ${fmt(v.sku)}<br>
+      Секции: ${fmt(v.sections)} · ШК: ${fmt(v.shk)}<br>
       Камеры: ${fmt(v.cams)} · Персонал: ${fmt(v.staff)}<br>
+      Использование площади: ${fmt1(v.area)} м²<br>
       <button class="btn small" onclick="applyOptimizerVariant('${v.id}')">Применить</button>
     </div>`
   ).join('');
@@ -1096,3 +1097,5 @@ document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
 
 renderAll();
+
+/* MFC Planner 7.2 Smart Projects update */
