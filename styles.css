@@ -84,3 +84,13 @@ h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9
 .project-current span{font-size:12px;color:#776a83}.project-current b{font-size:13px;color:#51227b;text-align:right}
 .selected-editor select{width:100%}
 @media(max-width:1200px){.topbar{align-items:flex-start}.actions{flex-wrap:wrap}.project-switcher{width:100%;flex-wrap:wrap}.project-switcher select{flex:1}}
+
+
+/* 7.4.4 multiple projects + lightweight optimizer */
+.optimizer-panel{background:linear-gradient(160deg,#fff,#f8f2ff)}
+.badge-lite{font-size:10px;font-weight:800;color:#5f2f8f;background:#eee3f9;padding:4px 7px;border-radius:999px}
+.optimizer-find{margin-bottom:10px}
+.variant-details{border:1px solid #e7daef;background:#fcf9ff;border-radius:12px;padding:10px;margin:9px 0}
+.variant-kpis{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:7px}
+.variant-kpis div{background:#fff;border:1px solid #eee4f4;border-radius:9px;padding:8px}
+.variant-kpis span{display:block;font-size:10px;color:#7b6f85}.variant-kpis b{display:block;font-size:14px;color:#532b7b;margin-top:3px}

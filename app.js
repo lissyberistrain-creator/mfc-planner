@@ -25,9 +25,9 @@ const defaults={
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV743')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerV744')||'null');
 if(!state){
-  const previousKeys=['mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
+  const previousKeys=['mfcPlannerV743','mfcPlannerV742','mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
   for(const key of previousKeys){
     try{
       const candidate=JSON.parse(localStorage.getItem(key)||'null');
@@ -97,7 +97,7 @@ migrateV69();
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV743',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV744',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -592,7 +592,7 @@ function analytics(){
   const storage=getZone('Хранение');
   const processArea=state.zones.filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)+state.objects.filter(o=>o.type==='process').reduce((s,o)=>s+area(o),0);
   const supportArea=state.zones.filter(z=>z.type!=='process'&&z.type!=='storage').reduce((s,z)=>s+netArea(z),0)+state.objects.filter(o=>o.type!=='process'&&o.type!=='storage').reduce((s,o)=>s+area(o),0);
-  return {rp,vol,cap100,cap,pm,cams,totalCams:cams.cams.length+other,area:state.roomL*state.roomW,storageArea:estimatedRackableArea(),processArea,supportArea,currentFOT,autoFOT,currentOpex:currentFOT+state.rent,autoOpex:autoFOT+state.rent,userCams,streetCount:rp.streetCount||0,rackFootprint:rp.rackArea||0};
+  return {rp,vol,cap100,cap,pm,cams,totalCams:cams.cams.length+other,area:state.roomL*state.roomW,storageArea:estimatedRackableArea(),processArea,supportArea,currentFOT,autoFOT,currentOpex:currentFOT+state.rent,autoOpex:autoFOT+state.rent,userCams,streetCount:rp.streetCount||0,rackFootprint:rp.rackArea||0,rackUsedArea:rackUsedArea(),unusedRackableArea:unusedRackableArea()};
 }
 
 
@@ -898,7 +898,7 @@ function renderTabs(){
   $('tab-analytics').innerHTML=`<div class="cards3">${metric('ФОТ текущий',money(a.currentFOT))}${metric('ФОТ с автоштатом',money(a.autoFOT))}${metric('OPEX с арендой',money(a.currentOpex))}</div>
   <table class="tbl"><tr><th>Аналитика</th><th>Значение</th></tr>${tr('Доля площади, занятой стеллажами',fmt1(a.rackUsedArea/a.area*100)+'%')}
     ${tr('Неиспользуемая доступная площадь',fmt1(a.unusedRackableArea)+' м²')}${tr('Доля процессных зон',fmt1(a.processArea/a.area*100)+'%')}${tr('Доля staff/service',fmt1(a.supportArea/a.area*100)+'%')}${tr('Секций на 1 м²',fmt1(a.rp.total/a.area))}
-    ${tr('Алгоритм размещения стеллажей','автозаполнение всей свободной рабочей площади')}${tr('SKU на 1 м²',fmt1(a.cap/a.area))}${tr('Сборка',route+' · площадь 1 этажа не занимает')}${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' ШК/мес')}${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' ШК/мес')}${tr('CAPEX',money(state.capex||2921881))}${tr('Аренда',money(state.rent||300000))}</table>`;
+    ${tr('Алгоритм размещения стеллажей','автозаполнение всей свободной рабочей площади')}${tr('ШК на 1 м²',fmt1(a.cap/a.area))}${tr('Сборка',route+' · площадь 1 этажа не занимает')}${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' ШК/мес')}${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' ШК/мес')}${tr('CAPEX',money(state.capex||2921881))}${tr('Аренда',money(state.rent||300000))}</table>`;
 
   const warns=[],central=getZone('Центральный проход');
   if(central&&central.h<1.2)warns.push(['bad','Центральный проход меньше 1,2 м.']);
@@ -1051,15 +1051,23 @@ function addTemplate(template){
   renderAll();
 }
 
-const PROJECTS_KEY='mfcPlannerProjectsV743';
-const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV743';
-let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||'';
+const PROJECTS_KEY='mfcPlannerProjectsV744';
+const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV744';
+let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||localStorage.getItem('mfcPlannerCurrentProjectV743')||'';
 
 function escapeHtml(s){return String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
 function readProjects(){
   try{
-    const p=JSON.parse(localStorage.getItem(PROJECTS_KEY)||'[]');
-    return Array.isArray(p)?p:[];
+    let p=JSON.parse(localStorage.getItem(PROJECTS_KEY)||'[]');
+    if(!Array.isArray(p)) p=[];
+    if(!p.length){
+      const legacy=JSON.parse(localStorage.getItem('mfcPlannerProjectsV743')||'[]');
+      if(Array.isArray(legacy)&&legacy.length){
+        p=legacy;
+        localStorage.setItem(PROJECTS_KEY,JSON.stringify(p));
+      }
+    }
+    return p;
   }catch(e){return []}
 }
 function writeProjects(projects){localStorage.setItem(PROJECTS_KEY,JSON.stringify(projects));}
@@ -1081,23 +1089,44 @@ function renderProjectSelector(){
 function saveNamedProject(forceNew=false){
   const projects=readProjects();
   const current=projects.find(p=>p.id===currentProjectId);
-  const suggested=current&&!forceNew?current.name:`MFC ${fmt1(state.roomL*state.roomW)} м²`;
-  const name=prompt(forceNew?'Название копии плана:':'Название плана:',suggested);
+  const defaultName=forceNew
+    ? (current?current.name+' — копия':`MFC ${fmt1(state.roomL*state.roomW)} м² — вариант`)
+    : (current?current.name:`MFC ${fmt1(state.roomL*state.roomW)} м²`);
+
+  const name=prompt(forceNew?'Название нового плана:':'Название плана:',defaultName);
   if(!name||!name.trim())return;
   const clean=name.trim();
   const now=Date.now();
-  let project;
-  if(current&&!forceNew){
-    current.name=clean; current.state=projectSnapshot(); current.updatedAt=now; project=current;
+
+  // Если у текущего плана оставили то же имя, просто обновляем его.
+  if(current && !forceNew && clean.toLocaleLowerCase('ru-RU')===current.name.toLocaleLowerCase('ru-RU')){
+    current.state=projectSnapshot();
+    current.updatedAt=now;
   }else{
-    project={id:'p_'+now+'_'+Math.random().toString(36).slice(2,7),name:clean,state:projectSnapshot(),createdAt:now,updatedAt:now};
-    projects.push(project);
-    currentProjectId=project.id;
+    // Любое другое имя создаёт отдельный план. Так можно хранить сколько угодно вариантов.
+    const sameName=projects.find(p=>p.name.toLocaleLowerCase('ru-RU')===clean.toLocaleLowerCase('ru-RU'));
+    if(sameName && sameName.id!==currentProjectId){
+      const overwrite=confirm(`План «${clean}» уже существует. Обновить его?\n\nОК — обновить существующий\nОтмена — создать отдельную копию`);
+      if(overwrite){
+        sameName.state=projectSnapshot();
+        sameName.updatedAt=now;
+        currentProjectId=sameName.id;
+      }else{
+        const project={id:'p_'+now+'_'+Math.random().toString(36).slice(2,8),name:clean+' — '+new Date(now).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}),state:projectSnapshot(),createdAt:now,updatedAt:now};
+        projects.push(project);
+        currentProjectId=project.id;
+      }
+    }else{
+      const project={id:'p_'+now+'_'+Math.random().toString(36).slice(2,8),name:clean,state:projectSnapshot(),createdAt:now,updatedAt:now};
+      projects.push(project);
+      currentProjectId=project.id;
+    }
   }
+
   writeProjects(projects);
   localStorage.setItem(CURRENT_PROJECT_KEY,currentProjectId);
   renderProjectSelector();
-  if($('projectSaveStatus'))$('projectSaveStatus').textContent='Сохранено: '+new Date(now).toLocaleString('ru-RU');
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent='Сохранено планов: '+projects.length+' · '+new Date(now).toLocaleString('ru-RU');
 }
 function openProject(id){
   if(!id)return;
@@ -1129,6 +1158,144 @@ function autosaveCurrentProject(){
   if(!p)return;
   p.state=projectSnapshot(); p.updatedAt=Date.now(); writeProjects(projects);
   if($('projectSaveStatus'))$('projectSaveStatus').textContent='Автосохранение: '+new Date(p.updatedAt).toLocaleTimeString('ru-RU');
+}
+
+
+const VARIANT_KEY='mfcPlannerVariantsV744';
+let optimizerVariants=[];
+let optimizerBaseState=null;
+
+function setCentralAisleConfig(config){
+  state.zones=(state.zones||[]).filter(z=>z.name!=='Центральный проход');
+  if(!config||config.enabled===false)return;
+
+  const b=rackCandidateArea();
+  const width=clamp(Number(config.width)||1.2,1.0,2.6);
+  if(config.orientation==='horizontal'){
+    const y=b.y+(b.h-width)*clamp(config.position??.5,0,1);
+    state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',x:b.x,y,w:b.w,h:width,rotation:0,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
+  }else{
+    const x=b.x+(b.w-width)*clamp(config.position??.5,0,1);
+    state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',x,y:b.y,w:width,h:b.h,rotation:90,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
+  }
+  state.centralAisle=width;
+}
+
+function evaluateLayoutCandidate(base,config,label){
+  state=JSON.parse(JSON.stringify(base));
+  sanitizeState();migrateSmartZones();migrateV69();
+  setCentralAisleConfig(config);
+  const rp=rackPlan();
+  const rackable=estimatedRackableArea();
+  const free=Math.max(0,rackable-(rp.rackArea||0));
+  const volume=rp.total*state.rackL*state.rackD*state.rackH;
+  const capacity=volume*1000/Math.max(.1,state.avgSkuL)*state.fillPct/100;
+
+  let centrality=0;
+  if(config&&config.enabled!==false){
+    centrality=1-Math.min(1,Math.abs((config.position??.5)-.5)*2);
+  }
+  return {
+    id:'v_'+Math.random().toString(36).slice(2,9),
+    label,
+    config:config?JSON.parse(JSON.stringify(config)):{enabled:false},
+    sections:rp.total,
+    streets:rp.streetCount||0,
+    capacity,
+    free,
+    rackArea:rp.rackArea||0,
+    orientation:rp.orientation,
+    centrality,
+    snapshot:JSON.parse(JSON.stringify(state))
+  };
+}
+
+function findBestVariants(){
+  const original=JSON.parse(JSON.stringify(state));
+  optimizerBaseState=JSON.parse(JSON.stringify(state));
+  const candidates=[];
+
+  // Без ЦП — обязательный кандидат для реального максимума хранения.
+  candidates.push(evaluateLayoutCandidate(optimizerBaseState,{enabled:false},'Без ЦП'));
+
+  const widths=[1.0,1.2,1.4,1.6];
+  const positions=[.35,.5,.65];
+  ['vertical','horizontal'].forEach(orientation=>{
+    widths.forEach(width=>positions.forEach(position=>{
+      candidates.push(evaluateLayoutCandidate(optimizerBaseState,{enabled:true,orientation,width,position},`${orientation==='vertical'?'Вертикальный':'Горизонтальный'} ЦП ${width} м`));
+    }));
+  });
+
+  const maxSections=Math.max(1,...candidates.map(v=>v.sections));
+  const maxFree=Math.max(1,...candidates.map(v=>v.free));
+
+  const storage=[...candidates].sort((a,b)=>b.sections-a.sections || a.free-b.free)[0];
+  const balanced=[...candidates].filter(v=>v.config.enabled!==false).sort((a,b)=>{
+    const sa=(a.sections/maxSections)*70+a.centrality*25+(1-a.free/maxFree)*5;
+    const sb=(b.sections/maxSections)*70+b.centrality*25+(1-b.free/maxFree)*5;
+    return sb-sa;
+  })[0]||storage;
+  const flow=[...candidates].filter(v=>v.config.enabled!==false).sort((a,b)=>{
+    const aw=(a.config.width||0),bw=(b.config.width||0);
+    const sa=a.centrality*45+Math.min(1,aw/1.6)*35+(a.sections/maxSections)*20;
+    const sb=b.centrality*45+Math.min(1,bw/1.6)*35+(b.sections/maxSections)*20;
+    return sb-sa;
+  })[0]||balanced;
+
+  const seen=new Set();
+  optimizerVariants=[];
+  [
+    {...storage,mode:'capacity',title:'Максимум хранения'},
+    {...balanced,mode:'balanced',title:'Баланс'},
+    {...flow,mode:'flow',title:'Максимальный поток'}
+  ].forEach(v=>{
+    const key=JSON.stringify(v.config);
+    if(!seen.has(v.mode+key)){seen.add(v.mode+key);optimizerVariants.push(v)}
+  });
+
+  state=original;
+  sanitizeState();migrateSmartZones();migrateV69();
+  renderVariantSelector();
+  renderAll();
+}
+
+function renderVariantSelector(){
+  const sel=$('variantSelect');
+  const box=$('variantDetails');
+  if(!sel||!box)return;
+  if(!optimizerVariants.length){
+    sel.innerHTML='<option value="">Сначала нажми «Найти варианты»</option>';
+    box.innerHTML='<div class="hint">Проверяются варианты с ЦП и без ЦП. Расчёт лёгкий и не запускает камеры для каждого сценария.</div>';
+    return;
+  }
+  sel.innerHTML=optimizerVariants.map((v,i)=>`<option value="${i}">${v.title}: ${fmt(v.sections)} секций · ${fmt(v.capacity)} ШК</option>`).join('');
+  showVariantDetails(0);
+}
+
+function showVariantDetails(index){
+  const v=optimizerVariants[Number(index)];
+  const box=$('variantDetails');
+  if(!v||!box)return;
+  const cp=v.config.enabled===false?'без ЦП':`${v.config.orientation==='vertical'?'вертикальный':'горизонтальный'} ЦП ${fmt1(v.config.width)} м`;
+  box.innerHTML=`<div class="variant-kpis">
+    <div><span>Секции</span><b>${fmt(v.sections)}</b></div>
+    <div><span>Вместимость</span><b>${fmt(v.capacity)} ШК</b></div>
+    <div><span>Улицы</span><b>${fmt(v.streets)}</b></div>
+    <div><span>Свободно</span><b>${fmt1(v.free)} м²</b></div>
+  </div><div class="hint">${cp} · стеллажи ${v.orientation==='horizontal'?'продольные':'поперечные'}</div>`;
+}
+
+function applySelectedVariant(){
+  const v=optimizerVariants[Number($('variantSelect')?.value)];
+  if(!v)return alert('Сначала найди и выбери вариант.');
+  state=JSON.parse(JSON.stringify(v.snapshot));
+  state.layoutMode=v.mode;
+  sanitizeState();migrateSmartZones();migrateV69();
+  inputIds.forEach(k=>{if($(k))$(k).value=state[k]});
+  if($('layoutMode'))$('layoutMode').value=state.layoutMode;
+  selected={kind:null,index:null};
+  renderAll();
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent=`Применён вариант «${v.title}». Сохрани его под отдельным названием.`;
 }
 
 const inputIds=['roomL','roomW','roomH','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','cameraRange','coverageStep'];
@@ -1166,13 +1333,17 @@ $('saveBtn').onclick=()=>saveNamedProject(false);
 $('duplicateProjectBtn').onclick=()=>saveNamedProject(true);
 $('deleteProjectBtn').onclick=deleteCurrentProject;
 $('projectSelect').onchange=()=>{if($('projectSelect').value)openProject($('projectSelect').value)};
+$('findVariantsBtn').onclick=findBestVariants;
+$('variantSelect').onchange=()=>showVariantDetails($('variantSelect').value);
+$('applyVariantBtn').onclick=applySelectedVariant;
 $('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>$(id).value=state[id]);renderProjectSelector();renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.4.3.json';a.click();URL.revokeObjectURL(a.href)};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.4.4.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));selected={kind:null};inputIds.forEach(id=>$(id).value=state[id]);$('layoutMode').value=state.layoutMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
 
 renderProjectSelector();
+renderVariantSelector();
 if(currentProjectId){ const pp=readProjects().find(x=>x.id===currentProjectId); if(pp&&pp.state) openProject(currentProjectId); }
 setInterval(autosaveCurrentProject,15000);
 renderAll();

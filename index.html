@@ -3,20 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 7.4.2</title>
-  <link rel="stylesheet" href="styles.css?v=7.4.3">
+  <title>MFC Planner 7.4.4</title>
+  <link rel="stylesheet" href="styles.css?v=7.4.4">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">7.4.3</span></div>
+    <div class="brand">MFC Planner <span class="ver">7.4.4</span></div>
     <div class="sub">Интерактивный конструктор: зоны, объекты, повороты, центральный проход, камеры, колонны и сквозной поток</div>
   </div>
   <div class="actions">
     <div class="project-switcher">
       <select id="projectSelect" title="Сохранённые планы"><option value="">Мои планы</option></select>
       <button id="saveBtn" class="btn">Сохранить план</button>
-      <button id="duplicateProjectBtn" class="btn compact">Копия</button>
+      <button id="duplicateProjectBtn" class="btn compact">Сохранить как</button>
       <button id="deleteProjectBtn" class="btn compact danger">Удалить план</button>
     </div>
     <button id="optBtn" class="btn primary">Подобрать план</button>
@@ -57,6 +57,17 @@
     <button id="optSideBtn" class="btn primary wide">Подобрать оптимальный план</button>
 <button id="centerAisleBtn" class="btn secondary wide">ЦП по центру хранения</button>
     <div class="hint">После автоподбора всё можно двигать вручную. Центральный проход можно перетащить по вертикали внутри хранения.</div>
+  </section>
+
+  <section class="panel optimizer-panel">
+    <div class="headrow"><h3>Варианты планировки</h3><span class="badge-lite">лёгкий расчёт</span></div>
+    <button id="findVariantsBtn" class="btn primary wide optimizer-find">Найти лучшие варианты</button>
+    <label>Выбрать вариант
+      <select id="variantSelect"><option value="">Сначала нажми «Найти варианты»</option></select>
+    </label>
+    <div id="variantDetails" class="variant-details"><div class="hint">Сравним максимум хранения, баланс и максимальный поток.</div></div>
+    <button id="applyVariantBtn" class="btn secondary wide">Применить выбранный вариант</button>
+    <div class="hint">После применения можно сохранить вариант отдельным планом через «Сохранить план».</div>
   </section>
 
   <section class="panel">
@@ -197,6 +208,6 @@
 </main>
 </div>
 
-<script src="app.js?v=7.4.3"></script>
+<script src="app.js?v=7.4.4"></script>
 </body>
 </html>
