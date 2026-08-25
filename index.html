@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 7.5</title>
-  <link rel="stylesheet" href="styles.css?v=7.5">
+  <title>MFC Planner 7.6</title>
+  <link rel="stylesheet" href="styles.css?v=7.6">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">7.5</span></div>
-    <div class="sub">Интерактивный конструктор: зоны, объекты, повороты, центральный проход, камеры, колонны и сквозной поток</div>
+    <div class="brand">MFC Planner <span class="ver">7.6</span></div>
+    <div class="sub">Интерактивный конструктор: планировка, оптимизация, проверка доступности улиц и сквозной поток</div>
   </div>
   <div class="actions">
     <div class="project-switcher">
@@ -80,6 +80,30 @@
       <button id="fillStorageBtn" class="btn primary wide">Дозаполнить хранение</button>
     </div>
     <div class="hint">Зелёным показываются дополнительные секции. «Дозаполнить хранение» применяет абсолютный максимум по секциям.</div>
+  </section>
+
+  <section class="panel validation-panel">
+    <div class="headrow">
+      <h3>Validation Engine 7.6</h3>
+      <span id="validationBadge" class="validation-badge neutral">не проверен</span>
+    </div>
+
+    <button id="validateBtn" class="btn primary wide">Проверить жизнеспособность</button>
+
+    <div id="validationStats" class="validation-stats">
+      <div><span>Улицы</span><b>—</b></div>
+      <div><span>Тупики</span><b>—</b></div>
+      <div><span>Маршрут</span><b>—</b></div>
+    </div>
+
+    <label class="validation-toggle">
+      <input id="showValidationOverlay" type="checkbox" checked>
+      Показывать проблемные участки на плане
+    </label>
+
+    <div id="validationNote" class="hint">
+      Проверка планировочная. Она не подтверждает соответствие пожарным, строительным или охранным нормативам.
+    </div>
   </section>
 
   <section class="panel">
@@ -159,6 +183,7 @@
     <div class="card"><span>Макс. сквозной поток</span><b id="mThroughput"></b></div>
     <div class="card"><span>Камер</span><b id="mCams"></b></div>
     <div class="card"><span>Автоштат</span><b id="mStaff"></b></div>
+    <div class="card"><span>Планировочный score</span><b id="mValidation">—</b></div>
   </section>
 
   <section class="panel wide">
@@ -174,6 +199,7 @@
         <span><i class="dot service"></i>Сервис</span>
         <span><i class="dot column"></i>Колонна</span>
         <span><i class="dot cam"></i>Камера</span>
+        <span><i class="dot validation"></i>Проблема маршрута</span>
       </div>
     </div>
     <div class="toolbar">
@@ -220,6 +246,6 @@
 </main>
 </div>
 
-<script src="app.js?v=7.5"></script>
+<script src="app.js?v=7.6"></script>
 </body>
 </html>

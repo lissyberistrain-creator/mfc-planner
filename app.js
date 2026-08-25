@@ -25,9 +25,9 @@ const defaults={
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV744')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerV76')||'null');
 if(!state){
-  const previousKeys=['mfcPlannerV743','mfcPlannerV742','mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
+  const previousKeys=['mfcPlannerV744','mfcPlannerV743','mfcPlannerV742','mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
   for(const key of previousKeys){
     try{
       const candidate=JSON.parse(localStorage.getItem(key)||'null');
@@ -97,7 +97,7 @@ migrateV69();
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV744',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV76',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -691,6 +691,19 @@ function draw(){
     });
   });
 
+  // Validation Engine 7.6: проблемные участки улиц и буферы выходов.
+  if($('showValidationOverlay')?.checked && validationIsCurrent()){
+    (validationOverlayRects||[]).forEach(v=>{
+      add('rect',{
+        x:ox+v.x*sc,
+        y:oy+v.y*sc,
+        width:Math.max(2,v.w*sc),
+        height:Math.max(2,v.h*sc),
+        class:v.severity==='bad'?'validationIssueBad':'validationIssueWarn'
+      });
+    });
+  }
+
   // Теперь рисуем реальные интерактивные зоны поверх складской геометрии.
   state.zones.forEach((z,idx)=>{
     if(z.name==='Хранение') return; // legacy zone больше не рисуем
@@ -911,34 +924,7 @@ function renderTabs(){
     ${tr('Неиспользуемая доступная площадь',fmt1(a.unusedRackableArea)+' м²')}${tr('Доля процессных зон',fmt1(a.processArea/a.area*100)+'%')}${tr('Доля staff/service',fmt1(a.supportArea/a.area*100)+'%')}${tr('Секций на 1 м²',fmt1(a.rp.total/a.area))}
     ${tr('Алгоритм размещения стеллажей','автозаполнение всей свободной рабочей площади')}${tr('ШК на 1 м²',fmt1(a.cap/a.area))}${tr('Сборка',route+' · площадь 1 этажа не занимает')}${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' ШК/мес')}${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' ШК/мес')}${tr('CAPEX',money(state.capex||2921881))}${tr('Аренда',money(state.rent||300000))}</table>`;
 
-  const warns=[],central=getZone('Центральный проход');
-  if(central&&central.h<1.2)warns.push(['bad','Центральный проход меньше 1,2 м.']);
-  if(state.aisle<1)warns.push(['bad','Проход между стеллажными рядами меньше 1 м.']);
-  if(a.cams.uncovered.length)warns.push(['bad',`Есть ${a.cams.uncovered.length} контрольных точек без покрытия камер.`]);else warns.push(['good','Мёртвых зон по модели камер нет.']);
-  if(pm.util>1)warns.push(['bad',`Целевой поток ${fmt(state.targetFlow)} ШК/мес выше мощности текущей команды.`]);
-  if(central){const rc=rackCandidateArea();if(!rectsOverlap(rc,central))warns.push(['bad','Центральный проход находится вне рабочей складской площади.']);}
-  if(central){
-    const rc=rackCandidateArea();
-    if(centralIsVertical()){
-      const centerDelta=Math.abs((central.x+central.w/2)-(rc.x+rc.w/2));
-      if(centerDelta>rc.w*.18) warns.push(['info','Центральный проход смещён от центра рабочей площади. Проверь логистику маршрутов.']);
-    }else{
-      const centerDelta=Math.abs((central.y+central.h/2)-(rc.y+rc.h/2));
-      if(centerDelta>rc.h*.18) warns.push(['info','Центральный проход смещён от центра рабочей площади. Проверь логистику маршрутов.']);
-    }
-  }
-
-  const rackArea=rackCandidateArea();
-  state.objects
-    .filter(o=>o.affectsCapacity && rectsOverlap(rackArea,o))
-    .forEach(o=>warns.push(['info',`${o.name} занимает часть потенциальной площади под стеллажи.`]));
-  warns.push(['info','Добавленные объекты можно двигать, менять по размеру, поворачивать, копировать и удалять.']);
-  try{
-    $('tab-checks').innerHTML=warns.map(([c,t])=>`<div class="warnbox ${c}">${t}</div>`).join('');
-  }catch(e){
-    console.error('Checks render error',e);
-    $('tab-checks').innerHTML='<div class="warnbox bad">Не удалось отрисовать блок проверок. Остальные расчёты продолжают работать.</div>';
-  }
+  renderValidationPanels();
 }
 
 function renderAll(full=true){save();if(full){renderColumns();renderSelected()}draw();renderEmu();renderTabs()}
@@ -1062,9 +1048,9 @@ function addTemplate(template){
   renderAll();
 }
 
-const PROJECTS_KEY='mfcPlannerProjectsV744';
-const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV744';
-let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||localStorage.getItem('mfcPlannerCurrentProjectV743')||'';
+const PROJECTS_KEY='mfcPlannerProjectsV76';
+const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV76';
+let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||localStorage.getItem('mfcPlannerCurrentProjectV744')||localStorage.getItem('mfcPlannerCurrentProjectV743')||'';
 
 function escapeHtml(s){return String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
 function readProjects(){
@@ -1072,10 +1058,14 @@ function readProjects(){
     let p=JSON.parse(localStorage.getItem(PROJECTS_KEY)||'[]');
     if(!Array.isArray(p)) p=[];
     if(!p.length){
-      const legacy=JSON.parse(localStorage.getItem('mfcPlannerProjectsV743')||'[]');
-      if(Array.isArray(legacy)&&legacy.length){
-        p=legacy;
-        localStorage.setItem(PROJECTS_KEY,JSON.stringify(p));
+      const legacyKeys=['mfcPlannerProjectsV744','mfcPlannerProjectsV743'];
+      for(const key of legacyKeys){
+        const legacy=JSON.parse(localStorage.getItem(key)||'[]');
+        if(Array.isArray(legacy)&&legacy.length){
+          p=legacy;
+          localStorage.setItem(PROJECTS_KEY,JSON.stringify(p));
+          break;
+        }
       }
     }
     return p;
@@ -1179,6 +1169,8 @@ let optimizerAllCandidates=[];
 let optimizerSearchCount=0;
 let optimizerCurrentMetrics=null;
 let optimizerPreviewRacks=[];
+let validationReport=null;
+let validationOverlayRects=[];
 
 
 function setCentralAisleConfig(config){
@@ -1410,6 +1402,566 @@ function fillStorageToMaximum(){
   }
 }
 
+
+// ============================================================
+// MFC Planner 7.6 — Validation Engine
+// Это эвристическая проверка работоспособности планировки.
+// Она НЕ является подтверждением нормативного соответствия.
+// ============================================================
+
+function validationSignature(){
+  const payload={
+    roomL:state.roomL,roomW:state.roomW,
+    rackL:state.rackL,rackD:state.rackD,aisle:state.aisle,
+    targetFlow:state.targetFlow,opsPerShift:state.opsPerShift,
+    zones:(state.zones||[]).filter(z=>z.name!=='Хранение').map(z=>({
+      n:z.name,x:+z.x.toFixed(2),y:+z.y.toFixed(2),w:+z.w.toFixed(2),h:+z.h.toFixed(2),
+      r:z.rotation||0,role:z.zoneRole,bs:z.blocksStorage
+    })),
+    columns:(state.columns||[]).map(c=>({
+      x:+c.x.toFixed(2),y:+c.y.toFixed(2),w:+c.w.toFixed(2),h:+c.h.toFixed(2)
+    })),
+    objects:(state.objects||[]).map(o=>({
+      n:o.name,k:o.objectKind,x:+o.x.toFixed(2),y:+o.y.toFixed(2),w:+o.w.toFixed(2),h:+o.h.toFixed(2),
+      role:o.zoneRole,bs:o.blocksStorage
+    }))
+  };
+  return JSON.stringify(payload);
+}
+
+function entityInsideRoom(o){
+  return o.x>=-1e-6 && o.y>=-1e-6 &&
+    o.x+o.w<=state.roomL+1e-6 &&
+    o.y+o.h<=state.roomW+1e-6;
+}
+
+function expandAndClampRect(r,m){
+  const x=Math.max(0,r.x-m),y=Math.max(0,r.y-m);
+  const x2=Math.min(state.roomL,r.x+r.w+m);
+  const y2=Math.min(state.roomW,r.y+r.h+m);
+  return {x,y,w:Math.max(0,x2-x),h:Math.max(0,y2-y)};
+}
+
+function validationWalkableZone(z){
+  if(!z)return false;
+  if(['Центральный проход','Коридор персонала','Приёмка','Отгрузка','Вход поставщиков','Вход/выход персонала','Эвакуационный выход'].includes(z.name)) return true;
+  if(z.zoneRole==='process') return true;
+  return false;
+}
+
+function validationWalkableObject(o){
+  if(!o)return false;
+  if(o.objectKind==='door'||o.objectKind==='camera') return true;
+  if(o.name==='Дверь'||o.name==='Ручная камера') return true;
+  return false;
+}
+
+function validationPointBlocked(p,rp){
+  if(p.x<0||p.y<0||p.x>state.roomL||p.y>state.roomW)return true;
+
+  for(const r of (rp.racks||[])){
+    if(pointInRect(p,r)) return true;
+  }
+  for(const c of (state.columns||[])){
+    if(pointInRect(p,c)) return true;
+  }
+
+  for(const z of (state.zones||[])){
+    if(z.name==='Хранение') continue;
+    if(validationWalkableZone(z)) continue;
+    if(pointInRect(p,z)) return true;
+  }
+
+  for(const o of (state.objects||[])){
+    if(validationWalkableObject(o)) continue;
+    if(o.blocksStorage===false && o.type!=='equipment') continue;
+    if(pointInRect(p,o)) return true;
+  }
+
+  return false;
+}
+
+function buildValidationNetwork(rp){
+  // 0,4 м достаточно для планировочной оценки и остаётся лёгким для браузера.
+  const nominal=.4;
+  const nx=Math.max(2,Math.ceil(state.roomL/nominal));
+  const ny=Math.max(2,Math.ceil(state.roomW/nominal));
+  const dx=state.roomL/nx,dy=state.roomW/ny;
+  const N=nx*ny;
+  const blocked=new Uint8Array(N);
+  const dist=new Float64Array(N);
+  dist.fill(-1);
+
+  const idx=(ix,iy)=>iy*nx+ix;
+  const point=(ix,iy)=>({x:(ix+.5)*dx,y:(iy+.5)*dy});
+
+  for(let iy=0;iy<ny;iy++){
+    for(let ix=0;ix<nx;ix++){
+      if(validationPointBlocked(point(ix,iy),rp)) blocked[idx(ix,iy)]=1;
+    }
+  }
+
+  function nearestWalkable(x,y){
+    let cx=clamp(Math.floor(x/dx),0,nx-1);
+    let cy=clamp(Math.floor(y/dy),0,ny-1);
+    let best=-1,bestD=Infinity;
+    for(let radius=0;radius<=5;radius++){
+      for(let yy=Math.max(0,cy-radius);yy<=Math.min(ny-1,cy+radius);yy++){
+        for(let xx=Math.max(0,cx-radius);xx<=Math.min(nx-1,cx+radius);xx++){
+          const i=idx(xx,yy);
+          if(blocked[i])continue;
+          const p=point(xx,yy),d=(p.x-x)*(p.x-x)+(p.y-y)*(p.y-y);
+          if(d<bestD){bestD=d;best=i}
+        }
+      }
+      if(best>=0)return best;
+    }
+    return -1;
+  }
+
+  const seeds=[];
+  const seedNames=['Приёмка','Отгрузка','Вход поставщиков','Вход/выход персонала','Эвакуационный выход'];
+
+  (state.zones||[]).forEach(z=>{
+    if(seedNames.includes(z.name) || z.zoneRole==='process'){
+      const i=nearestWalkable(z.x+z.w/2,z.y+z.h/2);
+      if(i>=0)seeds.push(i);
+    }
+  });
+
+  (state.objects||[]).forEach(o=>{
+    if(o.objectKind==='door'||o.name==='Дверь'){
+      const i=nearestWalkable(o.x+o.w/2,o.y+o.h/2);
+      if(i>=0)seeds.push(i);
+    }
+  });
+
+  // Если входов/процессов нет, используем свободные клетки по периметру.
+  if(!seeds.length){
+    for(let ix=0;ix<nx;ix++){
+      [idx(ix,0),idx(ix,ny-1)].forEach(i=>{if(!blocked[i])seeds.push(i)});
+    }
+    for(let iy=0;iy<ny;iy++){
+      [idx(0,iy),idx(nx-1,iy)].forEach(i=>{if(!blocked[i])seeds.push(i)});
+    }
+  }
+
+  const q=new Int32Array(N);
+  let qh=0,qt=0;
+
+  [...new Set(seeds)].forEach(i=>{
+    if(i>=0&&!blocked[i]&&dist[i]<0){
+      dist[i]=0;
+      q[qt++]=i;
+    }
+  });
+
+  const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+  while(qh<qt){
+    const cur=q[qh++];
+    const cy=Math.floor(cur/nx),cx=cur-cy*nx;
+    for(const [sx,sy] of dirs){
+      const xx=cx+sx,yy=cy+sy;
+      if(xx<0||yy<0||xx>=nx||yy>=ny)continue;
+      const ni=idx(xx,yy);
+      if(blocked[ni]||dist[ni]>=0)continue;
+      dist[ni]=dist[cur]+(sx?dx:dy);
+      q[qt++]=ni;
+    }
+  }
+
+  function sample(x,y){
+    const ix=clamp(Math.floor(x/dx),0,nx-1);
+    const iy=clamp(Math.floor(y/dy),0,ny-1);
+    const i=idx(ix,iy);
+    return {blocked:!!blocked[i],reachable:dist[i]>=0,distance:dist[i],index:i};
+  }
+
+  function anyReachableInRect(r){
+    const x1=clamp(Math.floor(r.x/dx),0,nx-1);
+    const x2=clamp(Math.floor((r.x+r.w)/dx),0,nx-1);
+    const y1=clamp(Math.floor(r.y/dy),0,ny-1);
+    const y2=clamp(Math.floor((r.y+r.h)/dy),0,ny-1);
+    let min=Infinity,count=0;
+    for(let iy=y1;iy<=y2;iy++){
+      for(let ix=x1;ix<=x2;ix++){
+        const i=idx(ix,iy);
+        if(!blocked[i]&&dist[i]>=0){
+          count++;
+          if(dist[i]<min)min=dist[i];
+        }
+      }
+    }
+    return {reachable:count>0,distance:Number.isFinite(min)?min:-1,count};
+  }
+
+  return {nx,ny,dx,dy,sample,anyReachableInRect};
+}
+
+function rackAisleSegments(rp){
+  const out=[];
+  const tol=Math.max(.08,state.rackL*.18);
+
+  (rp.streets||[]).forEach((street,streetIndex)=>{
+    const pairs=[...(street.pairs||[])];
+    if(!pairs.length)return;
+
+    const axis=street.orientation==='horizontal'?'x':'y';
+    pairs.sort((a,b)=>a[axis]-b[axis]);
+
+    let group=[pairs[0]];
+    const flush=()=>{
+      if(!group.length)return;
+      const first=group[0],last=group[group.length-1];
+      let rect,length;
+
+      if(street.orientation==='horizontal'){
+        rect={
+          x:first.x,
+          y:street.y+state.rackD,
+          w:(last.x+state.rackL)-first.x,
+          h:state.aisle
+        };
+        length=rect.w;
+      }else{
+        rect={
+          x:street.x+state.rackD,
+          y:first.y,
+          w:state.aisle,
+          h:(last.y+state.rackL)-first.y
+        };
+        length=rect.h;
+      }
+
+      out.push({
+        streetIndex,
+        orientation:street.orientation,
+        rect,
+        length,
+        sectionPairs:group.length,
+        sections:group.length*2
+      });
+      group=[];
+    };
+
+    for(let i=1;i<pairs.length;i++){
+      const prev=pairs[i-1][axis];
+      const cur=pairs[i][axis];
+      if(cur-prev<=state.rackL+tol){
+        group.push(pairs[i]);
+      }else{
+        flush();
+        group=[pairs[i]];
+      }
+    }
+    flush();
+  });
+
+  return out;
+}
+
+function validationEndpointConnections(seg,net){
+  const d=Math.max(.25,Math.min(.55,state.aisle*.45));
+  let points;
+
+  if(seg.orientation==='horizontal'){
+    const cy=seg.rect.y+seg.rect.h/2;
+    points=[
+      {x:seg.rect.x-d,y:cy},
+      {x:seg.rect.x+seg.rect.w+d,y:cy}
+    ];
+  }else{
+    const cx=seg.rect.x+seg.rect.w/2;
+    points=[
+      {x:cx,y:seg.rect.y-d},
+      {x:cx,y:seg.rect.y+seg.rect.h+d}
+    ];
+  }
+
+  return points.reduce((n,p)=>{
+    if(p.x<0||p.y<0||p.x>state.roomL||p.y>state.roomW)return n;
+    const s=net.sample(p.x,p.y);
+    return n+(!s.blocked&&s.reachable?1:0);
+  },0);
+}
+
+function validateExitClearance(rp,exitObj,clearance=1){
+  const zone=expandAndClampRect(exitObj,clearance);
+  const hits=(rp.racks||[]).filter(r=>rectsOverlap(zone,r));
+  return {zone,hits:hits.length};
+}
+
+function buildValidationReport(){
+  const signature=validationSignature();
+  const rp=rackPlan();
+  const segments=rackAisleSegments(rp);
+  const net=buildValidationNetwork(rp);
+  const issues=[];
+  const overlay=[];
+
+  const push=(severity,title,detail='')=>issues.push({severity,title,detail});
+
+  // 1. Геометрия помещения
+  const entities=[
+    ...(state.zones||[]).filter(z=>z.name!=='Хранение').map(o=>({kind:'zone',o})),
+    ...(state.objects||[]).map(o=>({kind:'object',o})),
+    ...(state.columns||[]).map(o=>({kind:'column',o}))
+  ];
+  const outside=entities.filter(x=>!entityInsideRoom(x.o));
+  if(outside.length){
+    push('bad','Есть объекты за границей помещения',`${outside.length} шт. Нужно вернуть их внутрь контура.`);
+  }else{
+    push('good','Все зоны и объекты находятся внутри помещения');
+  }
+
+  // 2. Межрядный проход
+  if(state.aisle<1){
+    push('bad','Межрядный проход меньше 1,0 м',`Сейчас ${fmt1(state.aisle)} м. В модели принят планировочный минимум 1,0 м.`);
+  }else if(state.aisle<1.2){
+    push('warn','Межрядный проход 1,0–1,2 м',`Сейчас ${fmt1(state.aisle)} м. Для модели допустимо, но при интенсивном встречном движении стоит проверить запас.`);
+  }else{
+    push('good','Ширина межрядного прохода',`${fmt1(state.aisle)} м.`);
+  }
+
+  // 3. Центральный проход
+  const central=getZone('Центральный проход');
+  if(central){
+    const thickness=centralIsVertical()?central.w:central.h;
+    if(thickness<1.2){
+      push('bad','Центральный проход уже 1,2 м',`Сейчас ${fmt1(thickness)} м.`);
+    }else{
+      push('good','Центральный проход',`${fmt1(thickness)} м.`);
+    }
+
+    const centralOrientation=centralIsVertical()?'vertical':'horizontal';
+    if(rp.total>0 && centralOrientation===rp.orientation){
+      push('bad','ЦП идёт параллельно стеллажным улицам','Он не выполняет роль поперечного связующего прохода. Лучше развернуть ЦП на 90°.');
+    }else if(rp.total>0){
+      push('good','ЦП пересекает направление улиц','Ориентация ЦП перпендикулярна стеллажным улицам.');
+    }
+  }else{
+    const longest=segments.length?Math.max(...segments.map(s=>s.length)):0;
+    if(longest>12){
+      push('warn','Центральный проход отсутствует',`Есть улицы длиной до ${fmt1(longest)} м. Для рабочего проекта стоит проверить необходимость поперечного прохода.`);
+    }else{
+      push('info','Центральный проход отсутствует','Для режима «Максимум хранения» это допустимый планировочный сценарий.');
+    }
+  }
+
+  // 4. Доступность улиц
+  let accessible=0,inaccessible=0,deadEnds=0,twoWay=0;
+  const distances=[];
+  let longestSegment=0;
+
+  segments.forEach((seg,i)=>{
+    longestSegment=Math.max(longestSegment,seg.length);
+    const access=net.anyReachableInRect(seg.rect);
+    const connections=validationEndpointConnections(seg,net);
+
+    if(access.reachable){
+      accessible++;
+      if(access.distance>=0)distances.push(access.distance);
+
+      if(connections>=2){
+        twoWay++;
+      }else if(connections===1){
+        deadEnds++;
+        overlay.push({...seg.rect,severity:'warn',label:`Тупик ${i+1}`});
+      }else{
+        // Маршрут мог войти через разрыв в боковой части улицы.
+        // Считаем доступным, но требующим внимания.
+        deadEnds++;
+        overlay.push({...seg.rect,severity:'warn',label:`Один доступ ${i+1}`});
+      }
+    }else{
+      inaccessible++;
+      overlay.push({...seg.rect,severity:'bad',label:`Нет доступа ${i+1}`});
+    }
+  });
+
+  if(!segments.length){
+    push('bad','Стеллажные улицы не сформированы','Проверь размеры помещения, зоны и параметры стеллажей.');
+  }else if(inaccessible){
+    push('bad','Есть недоступные участки стеллажных улиц',`${inaccessible} из ${segments.length} участков не имеют маршрута от входов/процессных зон.`);
+  }else{
+    push('good','Все участки улиц доступны',`${accessible} из ${segments.length}.`);
+  }
+
+  if(deadEnds){
+    push('warn','Есть тупиковые участки',`${deadEnds} из ${segments.length}. Для интенсивного потока лучше иметь второй выход или связь с поперечным проходом.`);
+  }else if(segments.length){
+    push('good','Тупиков по модели не обнаружено',`${twoWay} участков имеют два конца, связанные с доступной сетью.`);
+  }
+
+  if(longestSegment>15){
+    push('warn','Есть длинные непрерывные улицы',`Максимальный участок ${fmt1(longestSegment)} м. Проверь необходимость дополнительной поперечной связи.`);
+  }else if(longestSegment>0){
+    push('info','Максимальная длина участка улицы',`${fmt1(longestSegment)} м.`);
+  }
+
+  // 5. Маршруты
+  const avgRoute=distances.length?distances.reduce((s,x)=>s+x,0)/distances.length:0;
+  const maxRoute=distances.length?Math.max(...distances):0;
+  if(distances.length){
+    if(maxRoute>25){
+      push('warn','Длинный маршрут до части хранения',`Оценочно до ${fmt1(maxRoute)} м по сетке проходов; средний ${fmt1(avgRoute)} м.`);
+    }else{
+      push('info','Маршрут до хранения',`Средний ${fmt1(avgRoute)} м, максимальный ${fmt1(maxRoute)} м по планировочной сетке.`);
+    }
+  }
+
+  // 6. Эвакуационный / обычные выходы — только геометрическая проверка буфера
+  const evac=[
+    ...(state.zones||[]).filter(z=>z.name==='Эвакуационный выход'),
+    ...(state.objects||[]).filter(o=>String(o.name||'').toLowerCase().includes('эвакуац'))
+  ];
+
+  if(!evac.length){
+    push('bad','На плане нет эвакуационного выхода','Добавь отдельный выход/маркер. Это только геометрическая проверка, не нормативная экспертиза.');
+  }else{
+    let blockedEvac=0;
+    evac.forEach(e=>{
+      const c=validateExitClearance(rp,e,1);
+      blockedEvac+=c.hits;
+      if(c.hits)overlay.push({...c.zone,severity:'bad',label:'Буфер выхода'});
+    });
+    if(blockedEvac){
+      push('bad','Стеллажи попадают в 1 м планировочного буфера эвакуационного выхода',`${blockedEvac} пересечений. Освободи пространство около выхода.`);
+    }else{
+      push('good','Планировочный буфер эвакуационного выхода свободен','В радиусе около 1 м стеллажи не обнаружены.');
+    }
+  }
+
+  // 7. Входы / двери
+  const accessMarkers=[
+    ...(state.zones||[]).filter(z=>['Вход поставщиков','Вход/выход персонала'].includes(z.name)),
+    ...(state.objects||[]).filter(o=>o.objectKind==='door'||o.name==='Дверь')
+  ];
+  if(!accessMarkers.length){
+    push('warn','Нет отдельных входов/дверей','Маршрутная модель использует процессные зоны как точки доступа.');
+  }else{
+    let blocked=0;
+    accessMarkers.forEach(e=>{
+      const c=validateExitClearance(rp,e,.6);
+      blocked+=c.hits;
+      if(c.hits)overlay.push({...c.zone,severity:'warn',label:'Буфер двери'});
+    });
+    if(blocked)push('warn','Есть стеллажи слишком близко к входам/дверям',`${blocked} пересечений с планировочным буфером 0,6 м.`);
+    else push('good','Подходы к входам/дверям по геометрии свободны');
+  }
+
+  // 8. Сквозной поток персонала
+  const pm=processModel(state.targetFlow);
+  if(pm.util>1){
+    push('bad','Целевой поток выше мощности текущего состава',`${fmt(state.targetFlow)} ШК/мес против расчётной мощности ${fmt(pm.maxMonthly)} ШК/мес.`);
+  }else if(pm.util>.9){
+    push('warn','Целевой поток близок к пределу команды',`Расчётная загрузка ${fmt1(pm.util*100)}%.`);
+  }else{
+    push('good','Целевой поток проходит по текущему составу',`Расчётная загрузка ${fmt1(pm.util*100)}%.`);
+  }
+
+  const bad=issues.filter(x=>x.severity==='bad').length;
+  const warn=issues.filter(x=>x.severity==='warn').length;
+  const score=clamp(Math.round(100-bad*17-warn*6),0,100);
+
+  let status='рабочая';
+  if(score<65)status='требует переработки';
+  else if(score<85)status='с корректировками';
+
+  return {
+    signature,
+    score,status,
+    issues,
+    overlay,
+    metrics:{
+      segments:segments.length,
+      accessible,
+      inaccessible,
+      deadEnds,
+      twoWay,
+      avgRoute,
+      maxRoute,
+      longestSegment,
+      sections:rp.total,
+      streets:rp.streetCount||0
+    }
+  };
+}
+
+function validationIsCurrent(){
+  return !!validationReport && validationReport.signature===validationSignature();
+}
+
+function renderValidationPanels(){
+  const badge=$('validationBadge');
+  const stats=$('validationStats');
+  const note=$('validationNote');
+  const hero=$('mValidation');
+  const tab=$('tab-checks');
+
+  if(!validationReport){
+    if(badge){badge.className='validation-badge neutral';badge.textContent='не проверен'}
+    if(hero)hero.textContent='—';
+    if(stats)stats.innerHTML='<div><span>Улицы</span><b>—</b></div><div><span>Тупики</span><b>—</b></div><div><span>Маршрут</span><b>—</b></div>';
+    if(tab)tab.innerHTML='<div class="warnbox info">Нажми «Проверить жизнеспособность». Validation Engine проверит доступность улиц, тупики, ЦП, буферы выходов и маршрутную связность.</div>';
+    return;
+  }
+
+  const current=validationIsCurrent();
+  const r=validationReport;
+  const cls=r.score>=85?'good':r.score>=65?'warn':'bad';
+
+  if(badge){
+    badge.className=`validation-badge ${current?cls:'neutral'}`;
+    badge.textContent=current?`${r.score}/100`:'план изменён';
+  }
+
+  if(hero)hero.textContent=current?`${r.score}/100`:'перепроверь';
+
+  if(stats){
+    stats.innerHTML=`
+      <div><span>Доступно улиц</span><b>${r.metrics.accessible}/${r.metrics.segments}</b></div>
+      <div><span>Тупики</span><b>${r.metrics.deadEnds}</b></div>
+      <div><span>Макс. маршрут</span><b>${fmt1(r.metrics.maxRoute)} м</b></div>
+    `;
+  }
+
+  if(note){
+    note.textContent=current
+      ? `Статус: ${r.status}. Score — эвристическая планировочная оценка, не нормативное заключение.`
+      : 'План изменён после последней проверки. Запусти Validation Engine повторно.';
+  }
+
+  if(tab){
+    const summary=`<div class="validation-summary">
+      <div><span>Score</span><b>${r.score}/100</b></div>
+      <div><span>Статус</span><b>${r.status}</b></div>
+      <div><span>Участков улиц</span><b>${r.metrics.segments}</b></div>
+      <div><span>Недоступно</span><b>${r.metrics.inaccessible}</b></div>
+      <div><span>Тупики</span><b>${r.metrics.deadEnds}</b></div>
+      <div><span>Макс. маршрут</span><b>${fmt1(r.metrics.maxRoute)} м</b></div>
+    </div>`;
+
+    const issueHtml=r.issues.map(x=>`
+      <div class="warnbox ${x.severity==='warn'?'warn':x.severity}">
+        <b>${x.title}</b>${x.detail?`<div class="validation-detail">${x.detail}</div>`:''}
+      </div>`).join('');
+
+    tab.innerHTML=summary+
+      (!current?'<div class="warnbox warn"><b>Результат устарел</b><div class="validation-detail">Планировка изменилась после проверки.</div></div>':'')+
+      issueHtml+
+      '<div class="warnbox info"><b>Важно</b><div class="validation-detail">Проверки ширины, выходов и маршрутов здесь являются проектными эвристиками. Для реального объекта нормативные требования нужно проверять отдельно.</div></div>';
+  }
+}
+
+function runValidation(){
+  validationReport=buildValidationReport();
+  validationOverlayRects=validationReport.overlay||[];
+  renderValidationPanels();
+  draw();
+}
+
+
 const inputIds=['roomL','roomW','roomH','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','cameraRange','coverageStep'];
 inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id]=parseFloat(el.value)||0;if(id==='centralAisle'){
   state.centralAisle=clamp(state.centralAisle,1.2,2.6);
@@ -1451,8 +2003,10 @@ $('variantSelect').onchange=()=>{optimizerPreviewRacks=[];showVariantDetails($('
 $('previewVariantBtn').onclick=previewSelectedVariant;
 $('applyVariantBtn').onclick=applySelectedVariant;
 $('fillStorageBtn').onclick=fillStorageToMaximum;
+$('validateBtn').onclick=runValidation;
+$('showValidationOverlay').onchange=()=>draw();
 $('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>$(id).value=state[id]);renderProjectSelector();renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.5.json';a.click();URL.revokeObjectURL(a.href)};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.6.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));selected={kind:null};inputIds.forEach(id=>$(id).value=state[id]);$('layoutMode').value=state.layoutMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
