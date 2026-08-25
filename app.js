@@ -25,7 +25,7 @@ const defaults={
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV742')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerV743')||'null');
 if(!state){
   const previousKeys=['mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
   for(const key of previousKeys){
@@ -64,6 +64,27 @@ function sanitizeState(){
 }
 sanitizeState();
 
+function inferZoneRole(o){
+  if(!o) return 'optional';
+  if(o.zoneRole) return o.zoneRole;
+  if(['Приёмка','Отгрузка','Упаковка','Контроль качества','Возвраты','Буфер приемки','Буфер отгрузки'].includes(o.name)) return 'process';
+  if(['Коридор персонала','WC','Раздевалка','Офис','Центральный проход'].includes(o.name)) return 'service';
+  if(['Вход поставщиков','Вход/выход персонала','Эвакуационный выход','Дверь'].includes(o.name)) return 'hard';
+  if(o.type==='process') return 'process';
+  if(o.type==='staff'||o.type==='service') return 'service';
+  return 'optional';
+}
+
+function migrateSmartZones(){
+  [...(state.zones||[]),...(state.objects||[])].forEach(o=>{
+    if(!o.zoneRole) o.zoneRole=inferZoneRole(o);
+    // Для старых проектов сохраняем физическую геометрию: объект блокирует хранение,
+    // пока пользователь явно не отключил это в редакторе.
+    if(o.blocksStorage===undefined) o.blocksStorage=(o.affectsCapacity!==false);
+  });
+}
+migrateSmartZones();
+
 function migrateV69(){
   // Сборка в этом проекте находится на мезонине и не должна занимать площадь 1 этажа.
   state.zones = (state.zones||[]).filter(z=>z.name!=='Сборка');
@@ -76,7 +97,7 @@ migrateV69();
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV742',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV743',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -288,7 +309,7 @@ function rackBlockers(){
   // Старую системную зону "Хранение" не используем как ограничитель.
   state.zones.forEach(z=>{
     if(z.name==='Хранение') return;
-    if(z.affectsCapacity===false) return;
+    if(z.blocksStorage===false || z.affectsCapacity===false) return;
     blockers.push({x:z.x,y:z.y,w:z.w,h:z.h,name:z.name,kind:'zone'});
   });
 
@@ -299,7 +320,7 @@ function rackBlockers(){
 
   // Пользовательские объекты блокируют только если включено влияние на вместимость.
   state.objects.forEach((o,i)=>{
-    if(o.affectsCapacity===false) return;
+    if(o.blocksStorage===false || o.affectsCapacity===false) return;
     blockers.push({
       x:o.x,y:o.y,w:o.w,h:o.h,
       name:o.name||('Объект '+(i+1)),
@@ -810,18 +831,22 @@ function renderSelected(){
     <label>Ширина<input id="sw" type="number" step="0.1" value="${obj.w.toFixed(1)}"></label>
     <label>Высота<input id="sh" type="number" step="0.1" value="${obj.h.toFixed(1)}"></label>
   </div>
-  ${selected.kind!=='column'?`<label>Тип<select id="selType"><option value="storage">Хранение</option><option value="process">Операционная зона</option><option value="staff">Персонал</option><option value="service">Проход / сервис</option><option value="equipment">Оборудование</option><option value="custom">Кастомный</option></select></label>
+  ${selected.kind!=='column'?`<label>Визуальный тип<select id="selType"><option value="storage">Хранение</option><option value="process">Операционная зона</option><option value="staff">Персонал</option><option value="service">Проход / сервис</option><option value="equipment">Оборудование</option><option value="custom">Кастомный</option></select></label>
+  <label>Роль при оптимизации<select id="zoneRole"><option value="hard">Жёсткое препятствие</option><option value="process">Процессная зона</option><option value="service">Сервисная зона</option><option value="optional">Опциональная зона</option></select></label>
   <div class="toggles">
-    <label><input id="capToggle" type="checkbox" ${obj.affectsCapacity?'checked':''}> влияет на вместимость</label>
+    <label><input id="blockStorageToggle" type="checkbox" ${obj.blocksStorage!==false?'checked':''}> занимает площадь для стеллажей</label>
+    <label><input id="capToggle" type="checkbox" ${obj.affectsCapacity?'checked':''}> влияет на аналитику вместимости</label>
     <label><input id="flowToggle" type="checkbox" ${obj.affectsFlow?'checked':''}> влияет на поток</label>
     <label><input id="camToggle" type="checkbox" ${obj.needsCamera?'checked':''}> нужен контроль камерой</label>
-  </div><div class="hint">Поворот: ${obj.rotation||0}°</div>`:''}`;
+  </div><div class="hint">Поворот: ${obj.rotation||0}°. Если снять «занимает площадь для стеллажей», оптимизатор сможет использовать эту область под хранение.</div>`:''}`;
   if($('selName'))$('selName').oninput=()=>{obj.name=$('selName').value;renderAll()};
   ['sx','sy','sw','sh'].forEach(id=>$(id).oninput=()=>{
     obj[{sx:'x',sy:'y',sw:'w',sh:'h'}[id]]=parseFloat($(id).value)||0;
     if(obj.name==='Центральный проход')state.centralAisle=centralIsVertical()?obj.w:obj.h;renderAll();
   });
   if($('selType')){$('selType').value=obj.type;$('selType').onchange=()=>{obj.type=$('selType').value;renderAll()}}
+  if($('zoneRole')){$('zoneRole').value=obj.zoneRole||inferZoneRole(obj);$('zoneRole').onchange=()=>{obj.zoneRole=$('zoneRole').value;renderAll()}}
+  if($('blockStorageToggle'))$('blockStorageToggle').onchange=()=>{obj.blocksStorage=$('blockStorageToggle').checked;renderAll()}
   if($('capToggle'))$('capToggle').onchange=()=>{obj.affectsCapacity=$('capToggle').checked;renderAll()};
   if($('flowToggle'))$('flowToggle').onchange=()=>{obj.affectsFlow=$('flowToggle').checked;renderAll()};
   if($('camToggle'))$('camToggle').onchange=()=>{obj.needsCamera=$('camToggle').checked;renderAll()};
@@ -997,6 +1022,115 @@ function deleteSelected(){
   renderAll();
 }
 
+
+
+function addTemplate(template){
+  const b=rackCandidateArea();
+  const x=clamp(b.x+b.w*.45,0,Math.max(0,state.roomL-2));
+  const y=clamp(b.y+b.h*.45,0,Math.max(0,state.roomW-2));
+  const catalog={
+    courier:{name:'Зона курьеров',type:'process',zoneRole:'optional',w:2.5,h:2,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
+    returns:{name:'Возвраты',type:'process',zoneRole:'process',w:2.5,h:2,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
+    buffer_in:{name:'Буфер приемки',type:'process',zoneRole:'process',w:2.5,h:1.6,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
+    buffer_out:{name:'Буфер отгрузки',type:'process',zoneRole:'process',w:2.5,h:1.6,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
+    packing:{name:'Упаковка',type:'process',zoneRole:'process',w:2.4,h:1.8,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
+    quality:{name:'Контроль качества',type:'process',zoneRole:'process',w:2.2,h:1.8,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
+    pallet:{name:'Паллетная зона',type:'storage',zoneRole:'optional',w:2.4,h:2.4,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
+    charging:{name:'Зарядка ТСД',type:'equipment',zoneRole:'service',w:1.4,h:1,affectsCapacity:true,blocksStorage:true,affectsFlow:false,needsCamera:false},
+    table:{name:'Стол',type:'equipment',zoneRole:'optional',w:1.4,h:.8,affectsCapacity:true,blocksStorage:true,affectsFlow:false,needsCamera:false},
+    camera:{name:'Ручная камера',type:'equipment',zoneRole:'optional',w:.35,h:.35,affectsCapacity:false,blocksStorage:false,affectsFlow:false,needsCamera:false,objectKind:'camera'},
+    door:{name:'Дверь',type:'service',zoneRole:'hard',w:1.2,h:.25,affectsCapacity:true,blocksStorage:true,affectsFlow:false,needsCamera:false,objectKind:'door'},
+    custom:{name:'Своя зона',type:'custom',zoneRole:'optional',w:2,h:2,affectsCapacity:true,blocksStorage:true,affectsFlow:false,needsCamera:false}
+  };
+  const base=catalog[template]||catalog.custom;
+  const o={...base,x,y,rotation:0};
+  o.x=clamp(o.x,0,Math.max(0,state.roomL-o.w));
+  o.y=clamp(o.y,0,Math.max(0,state.roomW-o.h));
+  state.objects.push(o);
+  selected={kind:'object',index:state.objects.length-1};
+  renderAll();
+}
+
+const PROJECTS_KEY='mfcPlannerProjectsV743';
+const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV743';
+let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||'';
+
+function escapeHtml(s){return String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
+function readProjects(){
+  try{
+    const p=JSON.parse(localStorage.getItem(PROJECTS_KEY)||'[]');
+    return Array.isArray(p)?p:[];
+  }catch(e){return []}
+}
+function writeProjects(projects){localStorage.setItem(PROJECTS_KEY,JSON.stringify(projects));}
+function projectSnapshot(){
+  return JSON.parse(JSON.stringify(state));
+}
+function projectNameById(id){
+  const p=readProjects().find(x=>x.id===id);
+  return p?p.name:'Черновик';
+}
+function renderProjectSelector(){
+  const sel=$('projectSelect');
+  if(!sel)return;
+  const projects=readProjects().sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+  sel.innerHTML='<option value="">Мои планы ('+projects.length+')</option>'+projects.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  if(currentProjectId&&projects.some(p=>p.id===currentProjectId))sel.value=currentProjectId;
+  if($('currentProjectName'))$('currentProjectName').textContent=projectNameById(currentProjectId);
+}
+function saveNamedProject(forceNew=false){
+  const projects=readProjects();
+  const current=projects.find(p=>p.id===currentProjectId);
+  const suggested=current&&!forceNew?current.name:`MFC ${fmt1(state.roomL*state.roomW)} м²`;
+  const name=prompt(forceNew?'Название копии плана:':'Название плана:',suggested);
+  if(!name||!name.trim())return;
+  const clean=name.trim();
+  const now=Date.now();
+  let project;
+  if(current&&!forceNew){
+    current.name=clean; current.state=projectSnapshot(); current.updatedAt=now; project=current;
+  }else{
+    project={id:'p_'+now+'_'+Math.random().toString(36).slice(2,7),name:clean,state:projectSnapshot(),createdAt:now,updatedAt:now};
+    projects.push(project);
+    currentProjectId=project.id;
+  }
+  writeProjects(projects);
+  localStorage.setItem(CURRENT_PROJECT_KEY,currentProjectId);
+  renderProjectSelector();
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent='Сохранено: '+new Date(now).toLocaleString('ru-RU');
+}
+function openProject(id){
+  if(!id)return;
+  const p=readProjects().find(x=>x.id===id);
+  if(!p||!p.state)return;
+  state=Object.assign(structuredClone(defaults),JSON.parse(JSON.stringify(p.state)));
+  sanitizeState(); migrateSmartZones(); migrateV69();
+  currentProjectId=id;
+  localStorage.setItem(CURRENT_PROJECT_KEY,id);
+  inputIds.forEach(k=>{if($(k))$(k).value=state[k]});
+  if($('layoutMode'))$('layoutMode').value=state.layoutMode;
+  selected={kind:null,index:null};
+  save(); renderProjectSelector(); renderAll();
+}
+function deleteCurrentProject(){
+  if(!currentProjectId)return alert('Сначала выбери сохранённый план.');
+  const projects=readProjects();
+  const p=projects.find(x=>x.id===currentProjectId);
+  if(!p)return;
+  if(!confirm(`Удалить план «${p.name}»?`))return;
+  writeProjects(projects.filter(x=>x.id!==currentProjectId));
+  currentProjectId=''; localStorage.removeItem(CURRENT_PROJECT_KEY);
+  renderProjectSelector();
+}
+function autosaveCurrentProject(){
+  if(!currentProjectId)return;
+  const projects=readProjects();
+  const p=projects.find(x=>x.id===currentProjectId);
+  if(!p)return;
+  p.state=projectSnapshot(); p.updatedAt=Date.now(); writeProjects(projects);
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent='Автосохранение: '+new Date(p.updatedAt).toLocaleTimeString('ru-RU');
+}
+
 const inputIds=['roomL','roomW','roomH','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','cameraRange','coverageStep'];
 inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id]=parseFloat(el.value)||0;if(id==='centralAisle'){
   state.centralAisle=clamp(state.centralAisle,1.2,2.6);
@@ -1028,11 +1162,17 @@ $('centerAisleBtn').onclick=()=>{
 $('addColumnBtn').onclick=()=>{state.columns.push({x:6,y:3,w:.6,h:.6,rotation:0});selected={kind:'column',index:state.columns.length-1};renderAll()};
 document.querySelectorAll('.objbtn').forEach(b=>b.onclick=()=>addTemplate(b.dataset.template));
 $('rotateBtn').onclick=()=>rotateSelected();$('cloneBtn').onclick=()=>cloneSelected();$('deleteBtn').onclick=()=>deleteSelected();
-$('saveBtn').onclick=()=>save();
-$('resetBtn').onclick=()=>{if(confirm('Сбросить проект?')){state=structuredClone(defaults);initZones();selected={kind:null};inputIds.forEach(id=>$(id).value=state[id]);renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.4.2.json';a.click();URL.revokeObjectURL(a.href)};
+$('saveBtn').onclick=()=>saveNamedProject(false);
+$('duplicateProjectBtn').onclick=()=>saveNamedProject(true);
+$('deleteProjectBtn').onclick=deleteCurrentProject;
+$('projectSelect').onchange=()=>{if($('projectSelect').value)openProject($('projectSelect').value)};
+$('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>$(id).value=state[id]);renderProjectSelector();renderAll()}};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.4.3.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));selected={kind:null};inputIds.forEach(id=>$(id).value=state[id]);$('layoutMode').value=state.layoutMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
 
+renderProjectSelector();
+if(currentProjectId){ const pp=readProjects().find(x=>x.id===currentProjectId); if(pp&&pp.state) openProject(currentProjectId); }
+setInterval(autosaveCurrentProject,15000);
 renderAll();
