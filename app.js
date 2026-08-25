@@ -23,12 +23,13 @@ const defaults={
   centralAisle:1.6,rackL:1.2,rackD:0.5,rackH:2.5,shelves:5,aisle:1.2,fillPct:95,
   normAccept:2750,normPutaway:2750,normPick:1500,normShip:3500,
   opsPerShift:3,shiftsPerDay:2,paidHours:11,opRate:400,seniors:2,seniorSalary:90000,managers:1,managerSalary:130000,
+  turnoverMode:'working',turnoverRate:2.65,staffingTargetUtil:85,scaleBaselineCapacity:0,scaleBaselineArea:0,
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV77')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerV78')||'null');
 if(!state){
-  const previousKeys=['mfcPlannerV76','mfcPlannerV744','mfcPlannerV743','mfcPlannerV742','mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
+  const previousKeys=['mfcPlannerV77','mfcPlannerV76','mfcPlannerV744','mfcPlannerV743','mfcPlannerV742','mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
   for(const key of previousKeys){
     try{
       const candidate=JSON.parse(localStorage.getItem(key)||'null');
@@ -47,6 +48,7 @@ function sanitizeState(){
     'normAccept','normPutaway','normPick','normShip',
     'opsPerShift','shiftsPerDay','paidHours','opRate',
     'seniors','seniorSalary','managers','managerSalary',
+    'turnoverRate','staffingTargetUtil','scaleBaselineCapacity','scaleBaselineArea',
     'cameraRange','coverageStep','avgFlow','maxFlow',
     'fixedPC','fixedTsd','fixedTablet','rent','capex'
   ];
@@ -59,6 +61,9 @@ function sanitizeState(){
     }
   });
   if(!state.layoutMode) state.layoutMode=defaults.layoutMode;
+  if(!['one','working','high','custom'].includes(state.turnoverMode)) state.turnoverMode='working';
+  state.turnoverRate=Math.max(.1,Number(state.turnoverRate)||2.65);
+  state.staffingTargetUtil=clamp(Number(state.staffingTargetUtil)||85,50,100);
   if(!['ground','mezzanine'].includes(state.activeLevel)) state.activeLevel='ground';
   state.mezzanineL=Math.max(2,Number(state.mezzanineL)||state.roomL||20);
   state.mezzanineW=Math.max(2,Number(state.mezzanineW)||state.roomW||10);
@@ -156,7 +161,7 @@ migrateV69();
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV77',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV78',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -652,6 +657,170 @@ function unusedRackableArea(){
   return Math.max(0,rackableFreeArea()-rackUsedArea());
 }
 
+
+// ============================================================
+// MFC Planner 7.8 — Capacity & Staffing Scaling
+// Связка: вместимость → оборот → поток → операторы → ФОТ/OPEX.
+// ============================================================
+
+function turnoverRateValue(){
+  if(state.turnoverMode==='one') return 1;
+  if(state.turnoverMode==='high') return 3.18;
+  if(state.turnoverMode==='custom') return Math.max(.1,Number(state.turnoverRate)||1);
+  return 2.65;
+}
+
+function processLaborCoefficient(){
+  const norms=[state.normAccept,state.normPutaway,state.normPick,state.normShip];
+  return norms.reduce((s,n)=>s+1/Math.max(1,Number(n)||1),0);
+}
+
+function maxThroughputForOperators(opsPerShift){
+  const labor=processLaborCoefficient();
+  if(!labor) return 0;
+  return Math.max(0,Number(opsPerShift)||0)*Math.max(1,state.shiftsPerDay)/labor*30;
+}
+
+function operatorMonthlyCostPerPosition(){
+  return Math.max(0,state.paidHours)*30*Math.max(0,state.opRate);
+}
+
+function ensureScalingBaseline(capacity,areaValue){
+  if(!(state.scaleBaselineCapacity>0) && capacity>0){
+    state.scaleBaselineCapacity=capacity;
+  }
+  if(!(state.scaleBaselineArea>0) && areaValue>0){
+    state.scaleBaselineArea=areaValue;
+  }
+}
+
+function staffingScaleModel(capacity,groundArea){
+  ensureScalingBaseline(capacity,groundArea);
+
+  const turnover=turnoverRateValue();
+  const plannedFlow=Math.max(0,capacity)*turnover;
+  const targetUtil=clamp((Number(state.staffingTargetUtil)||85)/100,.5,1);
+  const labor=processLaborCoefficient();
+
+  const operatorShiftsPerDay=plannedFlow/30*labor;
+  const minimumPerShift=Math.ceil(operatorShiftsPerDay/Math.max(1,state.shiftsPerDay));
+  const recommendedPerShift=Math.ceil(
+    (operatorShiftsPerDay/targetUtil)/Math.max(1,state.shiftsPerDay)
+  );
+
+  const currentPerShift=Math.max(0,Math.round(state.opsPerShift||0));
+  const addPerShift=Math.max(0,recommendedPerShift-currentPerShift);
+  const surplusPerShift=Math.max(0,currentPerShift-recommendedPerShift);
+
+  const currentOperatorPositions=currentPerShift*Math.max(1,state.shiftsPerDay);
+  const addedOperatorPositions=addPerShift*Math.max(1,state.shiftsPerDay);
+  const recommendedOperatorPositions=recommendedPerShift*Math.max(1,state.shiftsPerDay);
+
+  const currentHeadcount=currentOperatorPositions+state.seniors+state.managers;
+  const recommendedHeadcount=recommendedOperatorPositions+state.seniors+state.managers;
+  const afterAddPerShift=Math.max(currentPerShift,recommendedPerShift);
+  const afterAddHeadcount=afterAddPerShift*Math.max(1,state.shiftsPerDay)+state.seniors+state.managers;
+
+  const currentMax=maxThroughputForOperators(currentPerShift);
+  const recommendedMax=maxThroughputForOperators(recommendedPerShift);
+  const afterAddMax=maxThroughputForOperators(afterAddPerShift);
+  const throughputIncrease=Math.max(0,afterAddMax-currentMax);
+  const flowGap=Math.max(0,plannedFlow-currentMax);
+
+  const monthlyPerOperator=operatorMonthlyCostPerPosition();
+  const addFOT=addedOperatorPositions*monthlyPerOperator;
+  const currentFOT=currentOperatorPositions*monthlyPerOperator
+    +state.seniors*state.seniorSalary
+    +state.managers*state.managerSalary;
+  const afterAddFOT=currentFOT+addFOT;
+  const currentOpex=currentFOT+state.rent;
+  const afterAddOpex=afterAddFOT+state.rent;
+
+  const baseCap=Math.max(0,state.scaleBaselineCapacity||capacity);
+  const baseArea=Math.max(0,state.scaleBaselineArea||groundArea);
+  const storageDelta=capacity-baseCap;
+  const areaDelta=groundArea-baseArea;
+  const storageDeltaPct=baseCap?storageDelta/baseCap*100:0;
+  const areaDeltaPct=baseArea?areaDelta/baseArea*100:0;
+
+  const capacityUse=plannedFlow>0?Math.min(100,currentMax/plannedFlow*100):100;
+  const bottleneck=plannedFlow>currentMax?'personnel':'none';
+
+  return {
+    turnover,plannedFlow,targetUtil,labor,
+    operatorShiftsPerDay,minimumPerShift,recommendedPerShift,currentPerShift,
+    addPerShift,surplusPerShift,
+    currentOperatorPositions,addedOperatorPositions,recommendedOperatorPositions,
+    currentHeadcount,recommendedHeadcount,afterAddHeadcount,
+    currentMax,recommendedMax,afterAddMax,throughputIncrease,flowGap,
+    monthlyPerOperator,addFOT,currentFOT,afterAddFOT,currentOpex,afterAddOpex,
+    baseCap,baseArea,storageDelta,areaDelta,storageDeltaPct,areaDeltaPct,
+    capacityUse,bottleneck
+  };
+}
+
+function setScalingBaseline(){
+  const a=analytics();
+  state.scaleBaselineCapacity=a.cap;
+  state.scaleBaselineArea=a.groundArea;
+  save();
+  renderAll();
+  if($('projectSaveStatus')){
+    $('projectSaveStatus').textContent=`База зафиксирована: ${fmt(a.cap)} ШК · ${fmt1(a.groundArea)} м².`;
+  }
+}
+
+function applyScalingFlow(){
+  const a=analytics();
+  state.targetFlow=Math.round(a.scaling.plannedFlow);
+  state.simFlow=Math.round(a.scaling.plannedFlow);
+  if($('targetFlow'))$('targetFlow').value=state.targetFlow;
+  if($('simFlow'))$('simFlow').value=state.simFlow;
+  renderAll();
+}
+
+function applyScalingStaff(){
+  const a=analytics();
+  const s=a.scaling;
+  if(s.recommendedPerShift<=state.opsPerShift){
+    if($('projectSaveStatus'))$('projectSaveStatus').textContent='Текущего количества операторов достаточно для выбранного сценария.';
+    return;
+  }
+  state.opsPerShift=s.recommendedPerShift;
+  if($('opsPerShift'))$('opsPerShift').value=state.opsPerShift;
+  renderAll();
+  if($('projectSaveStatus')){
+    $('projectSaveStatus').textContent=`Применено: ${state.opsPerShift} операторов в смену. Старшие и руководитель не изменены.`;
+  }
+}
+
+function syncScalingControls(){
+  if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;
+  if($('turnoverRate'))$('turnoverRate').value=state.turnoverRate;
+  if($('staffingTargetUtil'))$('staffingTargetUtil').value=state.staffingTargetUtil;
+  if($('customTurnoverWrap'))$('customTurnoverWrap').classList.toggle('hidden',state.turnoverMode!=='custom');
+}
+
+function renderScalingSidebar(scale){
+  syncScalingControls();
+
+  const box=$('scalingSidebarSummary');
+  const badge=$('scalingStatusBadge');
+  if(!box||!badge)return;
+
+  const need=scale.addedOperatorPositions;
+  const statusClass=need>0?'bad':scale.surplusPerShift>0?'warn':'good';
+  badge.className=`scaling-badge ${statusClass}`;
+  badge.textContent=need>0?'не хватает людей':scale.surplusPerShift>0?'есть запас':'состав подходит';
+
+  box.innerHTML=`
+    <div><span>Поток от хранения</span><b>${fmt(scale.plannedFlow)} ШК/мес</b></div>
+    <div><span>Нужно / смену</span><b>${fmt(scale.recommendedPerShift)} оператора</b></div>
+    <div><span>Добавить в штат</span><b>${need?`+${fmt(need)}`:'0'} операторов</b></div>
+    <div><span>Прирост мощности</span><b>${scale.throughputIncrease?`+${fmt(scale.throughputIncrease)}`:'0'} ШК/мес</b></div>
+  `;
+}
+
 function analytics(){
   const rp=rackPlan(),vol=rp.total*state.rackL*state.rackD*state.rackH,cap100=vol*1000/state.avgSkuL,cap=cap100*state.fillPct/100;
   const pm=processModel(state.targetFlow),cams=storageCameras();
@@ -675,9 +844,10 @@ function analytics(){
 
   const groundArea=state.roomL*state.roomW;
   const mezzanineArea=state.mezzanineL*state.mezzanineW;
+  const scaling=staffingScaleModel(cap,groundArea);
 
   return {
-    rp,vol,cap100,cap,pm,cams,totalCams:cams.cams.length+other,
+    rp,vol,cap100,cap,pm,scaling,cams,totalCams:cams.cams.length+other,
     area:groundArea,groundArea,mezzanineArea,totalOperationalArea:groundArea+mezzanineArea,
     storageArea:estimatedRackableArea(),
     processArea:gp,supportArea:gs,
@@ -1017,37 +1187,120 @@ function renderEmu(){
 function tr(a,b,c,d){return `<tr><td>${a}</td><td>${b}</td>${c!==undefined?`<td>${c}</td>`:''}${d!==undefined?`<td>${d}</td>`:''}</tr>`}
 function metric(name,val,sub=''){return `<div class="metricrow"><span>${name}</span><b>${val}</b>${sub?`<small>${sub}</small>`:''}</div>`}
 function renderTabs(){
-  const a=analytics(),pm=a.pm;
+  const a=analytics(),pm=a.pm,scale=a.scaling;
+
   $('mArea').textContent=fmt1(a.groundArea)+' м²';
   if($('mMezzArea'))$('mMezzArea').textContent=fmt1(a.mezzanineArea)+' м²';
   $('mCapacity').textContent=fmt(a.cap)+' ШК';
   $('mThroughput').textContent=fmt(pm.maxMonthly)+' ШК/мес';
   $('mCams').textContent=fmt(a.totalCams)+' шт.';
   $('mStaff').textContent=pm.rec+' оп./смену';
+  if($('mScaledFlow'))$('mScaledFlow').textContent=fmt(scale.plannedFlow)+' ШК/мес';
+  if($('mAddStaff'))$('mAddStaff').textContent=scale.addedOperatorPositions?`+${fmt(scale.addedOperatorPositions)} чел.`:'0';
+  renderScalingSidebar(scale);
 
   const central=getZone('Центральный проход');
   const centralText=central&&onLevel(central,'ground')
     ? `${fmt1(state.centralAisle)} м · ${centralIsVertical()?'вертикальный':'горизонтальный'} · ${fmt1(area(central))} м²`
     : 'нет';
 
-  $('tab-capacity').innerHTML=`<div class="cards3">${metric('Площадь хранения 1 этажа',fmt1(a.storageArea)+' м²')}${metric('Секции',fmt(a.rp.total))}${metric('Рабочая вместимость',fmt(a.cap)+' ШК',state.fillPct+'% заполнения')}</div>
-  <table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr>${tr('Полезный объём',fmt1(a.vol)+' м³')}${tr('Вместимость 100%',fmt(a.cap100)+' ШК')}${tr('Рабочая вместимость',fmt(a.cap)+' ШК')}${tr('Центральный проход',centralText)}${tr('Мезонин','не уменьшает расчёт стеллажной вместимости 1 этажа')}</table>`;
+  $('tab-capacity').innerHTML=`<div class="cards3">
+    ${metric('Площадь хранения 1 этажа',fmt1(a.storageArea)+' м²')}
+    ${metric('Секции',fmt(a.rp.total))}
+    ${metric('Рабочая вместимость',fmt(a.cap)+' ШК',state.fillPct+'% заполнения')}
+  </div>
+  <table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr>
+    ${tr('Полезный объём',fmt1(a.vol)+' м³')}
+    ${tr('Вместимость 100%',fmt(a.cap100)+' ШК')}
+    ${tr('Рабочая вместимость',fmt(a.cap)+' ШК')}
+    ${tr('Изменение к базе',`${scale.storageDelta>=0?'+':''}${fmt(scale.storageDelta)} ШК (${scale.storageDeltaPct>=0?'+':''}${fmt1(scale.storageDeltaPct)}%)`)}
+    ${tr('Изменение площади к базе',`${scale.areaDelta>=0?'+':''}${fmt1(scale.areaDelta)} м² (${scale.areaDeltaPct>=0?'+':''}${fmt1(scale.areaDeltaPct)}%)`)}
+    ${tr('Центральный проход',centralText)}
+    ${tr('Мезонин','не уменьшает расчёт стеллажной вместимости 1 этажа')}
+  </table>`;
 
-  const oneTurn=processModel(a.cap),avg=processModel(state.avgFlow||100000),mx=processModel(state.maxFlow||120000);
-  $('tab-throughput').innerHTML=`<div class="cards3">${metric('1 оборот рабочего стока',fmt(a.cap)+' ШК/мес',fmt(a.cap/30)+' ШК/сутки')}${metric('Средний рабочий',fmt(state.avgFlow||100000)+' ШК/мес',fmt1(avg.util*100)+'% загрузки')}${metric('Максимальный',fmt(state.maxFlow||120000)+' ШК/мес',fmt1(mx.util*100)+'% загрузки')}</div>
-  <table class="tbl"><tr><th>Сценарий</th><th>Оборотов стока</th><th>Загрузка</th><th>Статус</th></tr>${tr('1 оборот',1,fmt1(oneTurn.util*100)+'%',oneTurn.util<=1?'проходит':'выше мощности')}${tr('Средний',((state.avgFlow||100000)/Math.max(1,a.cap)).toFixed(2),fmt1(avg.util*100)+'%',avg.util<=1?'проходит':'выше мощности')}${tr('Максимальный',((state.maxFlow||120000)/Math.max(1,a.cap)).toFixed(2),fmt1(mx.util*100)+'%',mx.util<=1?'проходит':'выше мощности')}${tr('Целевой',(state.targetFlow/Math.max(1,a.cap)).toFixed(2),fmt1(pm.util*100)+'%',pm.util<=1?'проходит':'выше мощности')}</table>`;
+  const oneTurn=processModel(a.cap);
+  const avg=processModel(state.avgFlow||100000);
+  const mx=processModel(state.maxFlow||120000);
+  const scaled=processModel(scale.plannedFlow);
 
-  $('tab-staff').innerHTML=`<div class="cards3">${metric('Минимум',pm.min+' оп./смену')}${metric('Рекомендуемо',pm.rec+' оп./смену','нагрузка до 85%')}${metric('Текущий состав',state.opsPerShift+' оп./смену',fmt1(pm.util*100)+'% загрузки')}</div>
-  <table class="tbl"><tr><th>Операция</th><th>Норма</th><th>Чел.-смен/сутки</th><th>Доля труда</th></tr>${Object.keys(pm.req).map(k=>tr(names[k],fmt(pm.norms[k]),fmt1(pm.req[k]),fmt1(pm.req[k]/pm.total*100)+'%')).join('')}</table>`;
+  $('tab-throughput').innerHTML=`<div class="cards3">
+    ${metric('1 оборот рабочего стока',fmt(a.cap)+' ШК/мес',fmt(a.cap/30)+' ШК/сутки')}
+    ${metric(`Сценарий × ${fmt1(scale.turnover)}`,fmt(scale.plannedFlow)+' ШК/мес',fmt(scale.plannedFlow/30)+' ШК/сутки')}
+    ${metric('Мощность текущего штата',fmt(scale.currentMax)+' ШК/мес',fmt1(scale.capacityUse)+'% требуемого потока')}
+  </div>
+  <table class="tbl"><tr><th>Сценарий</th><th>Оборотов стока</th><th>Загрузка</th><th>Статус</th></tr>
+    ${tr('1 оборот',1,fmt1(oneTurn.util*100)+'%',oneTurn.util<=1?'проходит':'выше мощности')}
+    ${tr('Средний',((state.avgFlow||100000)/Math.max(1,a.cap)).toFixed(2),fmt1(avg.util*100)+'%',avg.util<=1?'проходит':'выше мощности')}
+    ${tr('Максимальный',((state.maxFlow||120000)/Math.max(1,a.cap)).toFixed(2),fmt1(mx.util*100)+'%',mx.util<=1?'проходит':'выше мощности')}
+    ${tr('По вместимости',fmt1(scale.turnover),fmt1(scaled.util*100)+'%',scale.addPerShift?`нужно +${scale.addPerShift} оп./смену`:'текущий штат проходит')}
+    ${tr('Целевой',(state.targetFlow/Math.max(1,a.cap)).toFixed(2),fmt1(pm.util*100)+'%',pm.util<=1?'проходит':'выше мощности')}
+  </table>`;
 
-  $('tab-video').innerHTML=`<div class="cards3">${metric('Автокамеры склада',a.cams.cams.length)}${metric('Мёртвые точки',a.cams.uncovered.length,a.cams.uncovered.length?'нужно корректировать':'не обнаружены')}${metric('Итого камер',a.totalCams)}</div>
-  <table class="tbl"><tr><th>Блок</th><th>Количество</th><th>Комментарий</th></tr>${tr('Склад 1 этажа',a.cams.cams.length,'автопокрытие')}${tr('Пользовательские камеры',a.userCams,'все уровни')}${tr('Прочие точки',7,'базовые точки модели')}</table>`;
+  const bottleneckText=scale.bottleneck==='personnel'
+    ? `Персонал ограничивает использование потенциала хранения: текущая мощность покрывает ${fmt1(scale.capacityUse)}% сценарного потока.`
+    : 'Текущий штат покрывает выбранный сценарий оборота.';
 
-  $('tab-equip').innerHTML=`<div class="cards3">${metric('Пользовательские объекты',state.objects.length)}${metric('Колонны',state.columns.length)}${metric('Оборудование',state.objects.filter(o=>o.type==='equipment').length)}</div>
-  <table class="tbl"><tr><th>Объект</th><th>Количество</th><th>Комментарий</th></tr>${tr('Стационарные ПК',state.fixedPC||2,'базовая модель')}${tr('ТСД',state.fixedTsd||3,'базовая модель')}${tr('Планшеты',state.fixedTablet||2,'базовая модель')}${tr('Столы, двери, кастомные зоны',state.objects.length,'могут быть назначены на любой уровень')}</table>`;
+  $('tab-scaling').innerHTML=`<div class="cards3">
+    ${metric('Рабочая вместимость',fmt(a.cap)+' ШК',`${scale.storageDelta>=0?'+':''}${fmt(scale.storageDelta)} к базе`)}
+    ${metric('Плановый оборот',fmt1(scale.turnover)+'× / мес',fmt(scale.plannedFlow)+' ШК/мес')}
+    ${metric('Добавить операторов',scale.addedOperatorPositions?`+${fmt(scale.addedOperatorPositions)} чел.`:'0',scale.addPerShift?`+${scale.addPerShift} в каждую смену`:'штат достаточен')}
+  </div>
+  <div class="scaling-callout ${scale.bottleneck==='personnel'?'bad':'good'}">
+    <b>${scale.bottleneck==='personnel'?'Персонал — узкое место':'Штат соответствует сценарию'}</b>
+    <span>${bottleneckText}</span>
+  </div>
+  <table class="tbl"><tr><th>Масштабирование</th><th>Сейчас</th><th>После расчёта</th><th>Изменение</th></tr>
+    <tr><td>Площадь 1 этажа</td><td>${fmt1(scale.baseArea)} м²</td><td>${fmt1(a.groundArea)} м²</td><td>${scale.areaDelta>=0?'+':''}${fmt1(scale.areaDelta)} м²</td></tr>
+    <tr><td>Рабочая вместимость</td><td>${fmt(scale.baseCap)} ШК</td><td>${fmt(a.cap)} ШК</td><td>${scale.storageDelta>=0?'+':''}${fmt(scale.storageDelta)} ШК</td></tr>
+    <tr><td>Поток при выбранном обороте</td><td>—</td><td>${fmt(scale.plannedFlow)} ШК/мес</td><td>${fmt1(scale.turnover)} оборота</td></tr>
+    <tr><td>Операторы / смена</td><td>${fmt(scale.currentPerShift)}</td><td>${fmt(scale.recommendedPerShift)}</td><td>${scale.addPerShift?`+${fmt(scale.addPerShift)}`:scale.surplusPerShift?`запас ${fmt(scale.surplusPerShift)}`:'0'}</td></tr>
+    <tr><td>Операторы в двух сменах</td><td>${fmt(scale.currentOperatorPositions)}</td><td>${fmt(scale.recommendedOperatorPositions)}</td><td>${scale.addedOperatorPositions?`+${fmt(scale.addedOperatorPositions)}`:'0'}</td></tr>
+    <tr><td>Общий штат</td><td>${fmt(scale.currentHeadcount)}</td><td>${fmt(scale.recommendedHeadcount)}</td><td>${scale.recommendedHeadcount-scale.currentHeadcount>=0?'+':''}${fmt(scale.recommendedHeadcount-scale.currentHeadcount)}</td></tr>
+    <tr><td>Макс. сквозной поток команды</td><td>${fmt(scale.currentMax)} ШК/мес</td><td>${fmt(scale.afterAddMax)} ШК/мес</td><td>${scale.throughputIncrease?`+${fmt(scale.throughputIncrease)}`:'0'}</td></tr>
+    <tr><td>ФОТ</td><td>${money(scale.currentFOT)}</td><td>${money(scale.afterAddFOT)}</td><td>${scale.addFOT?`+${money(scale.addFOT)}`:'0 ₽'}</td></tr>
+    <tr><td>OPEX с арендой</td><td>${money(scale.currentOpex)}</td><td>${money(scale.afterAddOpex)}</td><td>${scale.addFOT?`+${money(scale.addFOT)}`:'0 ₽'}</td></tr>
+  </table>
+  <div class="hint scaling-footnote">
+    Расчёт сотрудников основан на нормах четырёх этапов и целевой загрузке ${fmt1(scale.targetUtil*100)}%.
+    Старшие и руководитель автоматически не масштабируются.
+  </div>`;
+
+  $('tab-staff').innerHTML=`<div class="cards3">
+    ${metric('Текущий состав',state.opsPerShift+' оп./смену',fmt(scale.currentOperatorPositions)+' операторских позиций')}
+    ${metric('Нужно по вместимости',scale.recommendedPerShift+' оп./смену',`${fmt1(scale.turnover)} оборота / мес`)}
+    ${metric('Добавить',scale.addedOperatorPositions?`+${fmt(scale.addedOperatorPositions)} операторов`:'0',scale.addPerShift?`+${scale.addPerShift} день +${scale.addPerShift} ночь при 2 сменах`:'текущего состава достаточно')}
+  </div>
+  <table class="tbl"><tr><th>Операция</th><th>Норма</th><th>Чел.-смен/сутки для сценария</th><th>Доля труда</th></tr>
+    ${Object.keys(scaled.req).map(k=>tr(names[k],fmt(scaled.norms[k]),fmt1(scaled.req[k]),fmt1(scaled.req[k]/scaled.total*100)+'%')).join('')}
+  </table>`;
+
+  $('tab-video').innerHTML=`<div class="cards3">
+    ${metric('Автокамеры склада',a.cams.cams.length)}
+    ${metric('Мёртвые точки',a.cams.uncovered.length,a.cams.uncovered.length?'нужно корректировать':'не обнаружены')}
+    ${metric('Итого камер',a.totalCams)}
+  </div>
+  <table class="tbl"><tr><th>Блок</th><th>Количество</th><th>Комментарий</th></tr>
+    ${tr('Склад 1 этажа',a.cams.cams.length,'автопокрытие')}
+    ${tr('Пользовательские камеры',a.userCams,'все уровни')}
+    ${tr('Прочие точки',7,'базовые точки модели')}
+  </table>`;
+
+  $('tab-equip').innerHTML=`<div class="cards3">
+    ${metric('Пользовательские объекты',state.objects.length)}
+    ${metric('Колонны',state.columns.length)}
+    ${metric('Оборудование',state.objects.filter(o=>o.type==='equipment').length)}
+  </div>
+  <table class="tbl"><tr><th>Объект</th><th>Количество</th><th>Комментарий</th></tr>
+    ${tr('Стационарные ПК',state.fixedPC||2,'базовая модель')}
+    ${tr('ТСД',state.fixedTsd||3,'базовая модель')}
+    ${tr('Планшеты',state.fixedTablet||2,'базовая модель')}
+    ${tr('Столы, двери, кастомные зоны',state.objects.length,'могут быть назначены на любой уровень')}
+  </table>`;
 
   const picking=(state.zones||[]).find(z=>z.name==='Сборка');
   const verticalLinks=(state.objects||[]).filter(o=>o.objectKind==='vertical_link');
+
   if($('tab-levels')){
     $('tab-levels').innerHTML=`<div class="cards3">
       ${metric('1 этаж',fmt1(a.groundArea)+' м²',fmt1(a.groundProcessArea)+' м² процессов')}
@@ -1063,7 +1316,11 @@ function renderTabs(){
     </table>`;
   }
 
-  $('tab-analytics').innerHTML=`<div class="cards3">${metric('ФОТ текущий',money(a.currentFOT))}${metric('ФОТ с автоштатом',money(a.autoFOT))}${metric('OPEX с арендой',money(a.currentOpex))}</div>
+  $('tab-analytics').innerHTML=`<div class="cards3">
+    ${metric('ФОТ текущий',money(a.currentFOT))}
+    ${metric('ФОТ после масштабирования',money(scale.afterAddFOT),scale.addFOT?`+${money(scale.addFOT)}`:'без изменений')}
+    ${metric('OPEX после масштабирования',money(scale.afterAddOpex))}
+  </div>
   <table class="tbl"><tr><th>Аналитика</th><th>Значение</th></tr>
     ${tr('Площадь 1 этажа',fmt1(a.groundArea)+' м²')}
     ${tr('Площадь мезонина',fmt1(a.mezzanineArea)+' м²')}
@@ -1075,8 +1332,10 @@ function renderTabs(){
     ${tr('Секций на 1 м² первого этажа',fmt1(a.rp.total/a.groundArea))}
     ${tr('ШК на 1 м² первого этажа',fmt1(a.cap/a.groundArea))}
     ${tr('Сборка',picking&&entityLevel(picking)==='mezzanine'?'мезонин · площадь 1 этажа не занимает':'проверь уровень')}
-    ${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' ШК/мес')}
-    ${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' ШК/мес')}
+    ${tr('Поток при выбранном обороте',fmt(scale.plannedFlow)+' ШК/мес')}
+    ${tr('Мощность текущего штата',fmt(scale.currentMax)+' ШК/мес')}
+    ${tr('Мощность после добавления операторов',fmt(scale.afterAddMax)+' ШК/мес')}
+    ${tr('Добавить операторов',fmt(scale.addedOperatorPositions))}
     ${tr('CAPEX',money(state.capex||2921881))}
     ${tr('Аренда',money(state.rent||300000))}
   </table>`;
@@ -1245,9 +1504,9 @@ function addTemplate(template){
   }
   renderAll();
 }
-const PROJECTS_KEY='mfcPlannerProjectsV77';
-const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV77';
-let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||localStorage.getItem('mfcPlannerCurrentProjectV76')||localStorage.getItem('mfcPlannerCurrentProjectV744')||localStorage.getItem('mfcPlannerCurrentProjectV743')||'';
+const PROJECTS_KEY='mfcPlannerProjectsV78';
+const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV78';
+let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||localStorage.getItem('mfcPlannerCurrentProjectV77')||localStorage.getItem('mfcPlannerCurrentProjectV76')||localStorage.getItem('mfcPlannerCurrentProjectV744')||localStorage.getItem('mfcPlannerCurrentProjectV743')||'';
 
 function escapeHtml(s){return String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
 function readProjects(){
@@ -1255,7 +1514,7 @@ function readProjects(){
     let p=JSON.parse(localStorage.getItem(PROJECTS_KEY)||'[]');
     if(!Array.isArray(p)) p=[];
     if(!p.length){
-      const legacyKeys=['mfcPlannerProjectsV76','mfcPlannerProjectsV744','mfcPlannerProjectsV743'];
+      const legacyKeys=['mfcPlannerProjectsV77','mfcPlannerProjectsV76','mfcPlannerProjectsV744','mfcPlannerProjectsV743'];
       for(const key of legacyKeys){
         const legacy=JSON.parse(localStorage.getItem(key)||'[]');
         if(Array.isArray(legacy)&&legacy.length){
@@ -1336,6 +1595,7 @@ function openProject(id){
   localStorage.setItem(CURRENT_PROJECT_KEY,id);
   inputIds.forEach(k=>{if($(k))$(k).value=state[k]});
   if($('layoutMode'))$('layoutMode').value=state.layoutMode;
+  if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;
   selected={kind:null,index:null};
   save(); renderProjectSelector(); renderAll();
 }
@@ -2096,6 +2356,17 @@ function buildValidationReport(){
     push('good','Целевой поток проходит по текущему составу',`Расчётная загрузка ${fmt1(pm.util*100)}%.`);
   }
 
+  // 10. Масштабирование персонала относительно фактической вместимости.
+  const validationCapacity=capacityFromRackPlan(rp);
+  const scale=staffingScaleModel(validationCapacity,state.roomL*state.roomW);
+  if(scale.addedOperatorPositions>0){
+    push('warn','Площадь и хранение требуют увеличения операторского штата',
+      `При ${fmt1(scale.turnover)} оборота/мес нужно ${scale.recommendedPerShift} операторов в смену. Добавить ${scale.addPerShift} в смену, всего +${scale.addedOperatorPositions} операторов.`);
+  }else{
+    push('good','Операторского состава хватает для выбранного оборота',
+      `${fmt(scale.plannedFlow)} ШК/мес при ${fmt1(scale.turnover)} оборота/мес.`);
+  }
+
   const bad=issues.filter(x=>x.severity==='bad').length;
   const warn=issues.filter(x=>x.severity==='warn').length;
   const score=clamp(Math.round(100-bad*17-warn*6),0,100);
@@ -2198,7 +2469,7 @@ function runValidation(){
 }
 
 
-const inputIds=['roomL','roomW','roomH','mezzanineL','mezzanineW','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','cameraRange','coverageStep'];
+const inputIds=['roomL','roomW','roomH','mezzanineL','mezzanineW','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','turnoverRate','staffingTargetUtil','cameraRange','coverageStep'];
 inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id]=parseFloat(el.value)||0;if(id==='centralAisle'){
   state.centralAisle=clamp(state.centralAisle,1.2,2.6);
   const c=getZone('Центральный проход');
@@ -2208,6 +2479,11 @@ inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id
   }
 }renderAll()}});
 $('layoutMode').value=state.layoutMode;$('layoutMode').onchange=()=>{state.layoutMode=$('layoutMode').value;renderAll()};
+$('turnoverMode').value=state.turnoverMode;
+$('turnoverMode').onchange=()=>{state.turnoverMode=$('turnoverMode').value;renderAll()};
+$('setScalingBaselineBtn').onclick=setScalingBaseline;
+$('applyScalingFlowBtn').onclick=applyScalingFlow;
+$('applyScalingStaffBtn').onclick=applyScalingStaff;
 document.querySelectorAll('[data-level-switch]').forEach(b=>b.onclick=()=>switchLevel(b.dataset.levelSwitch));
 $('optBtn').onclick=optimize;
 $('optSideBtn').onclick=optimize;
@@ -2247,9 +2523,9 @@ $('applyVariantBtn').onclick=applySelectedVariant;
 $('fillStorageBtn').onclick=fillStorageToMaximum;
 $('validateBtn').onclick=runValidation;
 $('showValidationOverlay').onchange=()=>draw();
-$('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();migrateV69();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>{if($(id))$(id).value=state[id]});renderProjectSelector();renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.7.json';a.click();URL.revokeObjectURL(a.href)};
-$('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));sanitizeState();migrateSmartZones();migrateV69();selected={kind:null};inputIds.forEach(id=>{if($(id))$(id).value=state[id]});$('layoutMode').value=state.layoutMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
+$('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();migrateV69();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>{if($(id))$(id).value=state[id]});if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderProjectSelector();renderAll()}};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.8.json';a.click();URL.revokeObjectURL(a.href)};
+$('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));sanitizeState();migrateSmartZones();migrateV69();selected={kind:null};inputIds.forEach(id=>{if($(id))$(id).value=state[id]});$('layoutMode').value=state.layoutMode;if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
 
