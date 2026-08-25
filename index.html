@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 5.0</title>
-  <link rel="stylesheet" href="styles.css?v=6.12">
+  <title>MFC Planner 7.4.2</title>
+  <link rel="stylesheet" href="styles.css?v=7.4.2">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">6.12</span></div>
+    <div class="brand">MFC Planner <span class="ver">7.4.2</span></div>
     <div class="sub">Интерактивный конструктор: зоны, объекты, повороты, центральный проход, камеры, колонны и сквозной поток</div>
   </div>
   <div class="actions">
@@ -29,7 +29,7 @@
       <label>Длина, м<input id="roomL" type="number" step="0.1"></label>
       <label>Ширина, м<input id="roomW" type="number" step="0.1"></label>
       <label>Высота, м<input id="roomH" type="number" step="0.1"></label>
-      <label>Средний SKU, л<input id="avgSkuL" type="number" step="0.1"></label>
+      <label>Средний объём ШК, л<input id="avgSkuL" type="number" step="0.1"></label>
     </div>
   </section>
 
@@ -42,7 +42,7 @@
         <option value="flow">Максимум пропускной способности</option>
       </select>
     </label>
-    <label>Целевой поток, SKU/мес<input id="targetFlow" type="number" step="1000"></label>
+    <label>Целевой поток, ШК/мес<input id="targetFlow" type="number" step="1000"></label>
     <label>Центральный проход, м<input id="centralAisle" type="number" step="0.1"></label>
     <button id="optSideBtn" class="btn primary wide">Подобрать оптимальный план</button>
 <button id="centerAisleBtn" class="btn secondary wide">ЦП по центру хранения</button>
@@ -161,7 +161,7 @@
         <h2>Эмулятор сквозной пропускной способности</h2>
         <div class="hint">Один объём проходит все этапы: приёмка → раскладка → сборка → отгрузка.</div>
       </div>
-      <label class="simlbl">Поток на проверку, SKU/мес<input id="simFlow" type="number" step="1000"></label>
+      <label class="simlbl">Поток на проверку, ШК/мес<input id="simFlow" type="number" step="1000"></label>
     </div>
     <div id="emulatorBody"></div>
   </section>
@@ -187,6 +187,6 @@
 </main>
 </div>
 
-<script src="app.js?v=6.12"></script>
+<script src="app.js?v=7.4.2"></script>
 </body>
 </html>

@@ -25,7 +25,7 @@ const defaults={
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV612')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerV742')||'null');
 if(!state){
   const previousKeys=['mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
   for(const key of previousKeys){
@@ -76,7 +76,7 @@ migrateV69();
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV612',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV742',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -284,37 +284,43 @@ function splitStorageBlocks(){
 function rackBlockers(){
   const blockers=[];
 
-  // Все зоны, кроме хранения, блокируют установку стеллажей.
+  // Реальные зоны блокируют хранение только в своей текущей геометрии.
+  // Старую системную зону "Хранение" не используем как ограничитель.
   state.zones.forEach(z=>{
     if(z.name==='Хранение') return;
-    blockers.push({x:z.x,y:z.y,w:z.w,h:z.h,name:z.name});
+    if(z.affectsCapacity===false) return;
+    blockers.push({x:z.x,y:z.y,w:z.w,h:z.h,name:z.name,kind:'zone'});
   });
 
-  // Колонны блокируют.
-  state.columns.forEach((c,i)=>blockers.push({x:c.x,y:c.y,w:c.w,h:c.h,name:'Колонна '+(i+1)}));
+  // Колонны всегда являются жесткими препятствиями.
+  state.columns.forEach((c,i)=>{
+    blockers.push({x:c.x,y:c.y,w:c.w,h:c.h,name:'Колонна '+(i+1),kind:'column'});
+  });
 
-  // Пользовательские объекты, влияющие на вместимость, блокируют.
+  // Пользовательские объекты блокируют только если включено влияние на вместимость.
   state.objects.forEach((o,i)=>{
-    if(o.affectsCapacity!==false){
-      blockers.push({x:o.x,y:o.y,w:o.w,h:o.h,name:o.name||('Объект '+(i+1))});
-    }
+    if(o.affectsCapacity===false) return;
+    blockers.push({
+      x:o.x,y:o.y,w:o.w,h:o.h,
+      name:o.name||('Объект '+(i+1)),
+      kind:'object'
+    });
   });
 
   return blockers;
 }
-
 function rackCandidateArea(){
-  // Рабочая зона начинается после коридора персонала.
-  const corridor=getZone('Коридор персонала');
-  const left=corridor ? corridor.x+corridor.w+0.2 : 0.2;
+  // Вся внутренняя площадь помещения является кандидатом под хранение.
+  // Коридоры, WC, офис, приемка, отгрузка, ЦП и т.п. вырезаются
+  // через rackBlockers() по их ФАКТИЧЕСКОМУ текущему положению.
+  const margin=.15;
   return {
-    x:left,
-    y:0.2,
-    w:Math.max(0.5,state.roomL-left-0.2),
-    h:Math.max(0.5,state.roomW-0.4)
+    x:margin,
+    y:margin,
+    w:Math.max(.5,state.roomL-margin*2),
+    h:Math.max(.5,state.roomW-margin*2)
   };
 }
-
 function rackCellAllowed(rect, blockers){
   // Не выходим из помещения.
   if(rect.x<0 || rect.y<0 || rect.x+rect.w>state.roomL || rect.y+rect.h>state.roomW) return false;
@@ -325,38 +331,113 @@ function rackCellAllowed(rect, blockers){
   return true;
 }
 
-function buildFreeRackPlan(orientation){
-  const area=rackCandidateArea();
+function buildFreeRackPlan(orientation, offset=0){
+  const bounds=rackCandidateArea();
   const blockers=rackBlockers();
   const racks=[];
+  const streets=[];
+
+  const rackLength=Math.max(.2,state.rackL);
+  const rackDepth=Math.max(.15,state.rackD);
+  const aisle=Math.max(.4,state.aisle);
+
+  // Одна улица: стеллаж + рабочий проход + стеллаж.
+  const streetWidth=rackDepth+aisle+rackDepth;
+
+  const allowed=rect=>{
+    if(rect.x<bounds.x-1e-9 || rect.y<bounds.y-1e-9 ||
+       rect.x+rect.w>bounds.x+bounds.w+1e-9 ||
+       rect.y+rect.h>bounds.y+bounds.h+1e-9) return false;
+    return !blockers.some(b=>rectsOverlap(rect,b));
+  };
 
   if(orientation==='horizontal'){
-    const rowPitch=state.rackD+state.aisle;
-    for(let y=area.y; y+state.rackD<=area.y+area.h+1e-9; y+=rowPitch){
-      for(let x=area.x; x+state.rackL<=area.x+area.w+1e-9; x+=state.rackL){
-        const r={x,y,w:state.rackL,h:state.rackD};
-        if(rackCellAllowed(r,blockers)) racks.push(r);
+    // Улица идет вдоль X. Два ряда смотрят друг на друга через проход.
+    for(let y=bounds.y+offset; y+streetWidth<=bounds.y+bounds.h+1e-9; y+=streetWidth){
+      const street={orientation:'horizontal',x:bounds.x,y,w:bounds.w,h:streetWidth,sections:0,pairs:[]};
+
+      for(let x=bounds.x; x+rackLength<=bounds.x+bounds.w+1e-9; x+=rackLength){
+        const rackA={x,y,w:rackLength,h:rackDepth,street:streets.length,side:'A'};
+        const aisleCell={x,y:y+rackDepth,w:rackLength,h:aisle};
+        const rackB={x,y:y+rackDepth+aisle,w:rackLength,h:rackDepth,street:streets.length,side:'B'};
+
+        // Для рабочей улицы обязательно должны существовать обе стороны
+        // и сам проход между ними.
+        if(allowed(rackA) && allowed(aisleCell) && allowed(rackB)){
+          racks.push(rackA,rackB);
+          street.pairs.push({x,y});
+          street.sections+=2;
+        }
       }
+
+      if(street.sections>0) streets.push(street);
     }
   }else{
-    const colPitch=state.rackD+state.aisle;
-    for(let x=area.x; x+state.rackD<=area.x+area.w+1e-9; x+=colPitch){
-      for(let y=area.y; y+state.rackL<=area.y+area.h+1e-9; y+=state.rackL){
-        const r={x,y,w:state.rackD,h:state.rackL};
-        if(rackCellAllowed(r,blockers)) racks.push(r);
+    // Улица идет вдоль Y.
+    for(let x=bounds.x+offset; x+streetWidth<=bounds.x+bounds.w+1e-9; x+=streetWidth){
+      const street={orientation:'vertical',x,y:bounds.y,w:streetWidth,h:bounds.h,sections:0,pairs:[]};
+
+      for(let y=bounds.y; y+rackLength<=bounds.y+bounds.h+1e-9; y+=rackLength){
+        const rackA={x,y,w:rackDepth,h:rackLength,street:streets.length,side:'A'};
+        const aisleCell={x:x+rackDepth,y,w:aisle,h:rackLength};
+        const rackB={x:x+rackDepth+aisle,y,w:rackDepth,h:rackLength,street:streets.length,side:'B'};
+
+        if(allowed(rackA) && allowed(aisleCell) && allowed(rackB)){
+          racks.push(rackA,rackB);
+          street.pairs.push({x,y});
+          street.sections+=2;
+        }
       }
+
+      if(street.sections>0) streets.push(street);
     }
   }
 
-  return {orientation,total:racks.length,racks};
+  return {
+    orientation,
+    total:racks.length,
+    racks,
+    streets,
+    streetCount:streets.length,
+    streetWidth,
+    rackArea:racks.reduce((s,r)=>s+r.w*r.h,0)
+  };
 }
-
 function freeRackPlan(){
-  const h=buildFreeRackPlan('horizontal');
-  const v=buildFreeRackPlan('vertical');
-  return v.total>h.total?v:h;
-}
+  const rackDepth=Math.max(.15,state.rackD);
+  const aisle=Math.max(.4,state.aisle);
+  const streetWidth=rackDepth*2+aisle;
 
+  // Сдвигаем сетку улиц несколькими способами.
+  // Это позволяет использовать площадь, освободившуюся после перемещения зон.
+  const offsets=[
+    0,
+    Math.min(rackDepth,streetWidth*.25),
+    streetWidth*.25,
+    streetWidth*.5
+  ];
+
+  const candidates=[];
+  offsets.forEach(o=>{
+    candidates.push(buildFreeRackPlan('horizontal',o));
+    candidates.push(buildFreeRackPlan('vertical',o));
+  });
+
+  candidates.sort((a,b)=>{
+    if(b.total!==a.total) return b.total-a.total;
+    if(b.streetCount!==a.streetCount) return b.streetCount-a.streetCount;
+    return b.rackArea-a.rackArea;
+  });
+
+  return candidates[0] || {
+    orientation:'horizontal',
+    total:0,
+    racks:[],
+    streets:[],
+    streetCount:0,
+    streetWidth
+  };
+}
 function rackLayoutForBlock(b,orientation){
   if(orientation==='horizontal'){
     const rows=[];for(let y=b.y;y+state.rackD<=b.y+b.h+1e-9;y+=state.rackD+state.aisle)rows.push(y);
@@ -366,9 +447,7 @@ function rackLayoutForBlock(b,orientation){
     const sec=Math.floor(b.h/Math.max(.1,state.rackL));return {orientation,cols,sec,total:cols.length*sec}
   }
 }
-function rackPlan(){
-  return freeRackPlan();
-}
+function rackPlan(){ return freeRackPlan(); }
 
 function processModel(flow){
   const daily=flow/30,norms={accept:state.normAccept,putaway:state.normPutaway,pick:state.normPick,ship:state.normShip};
@@ -452,19 +531,22 @@ function storageCameras(){
 function estimatedRackableArea(){
   const candidate=rackCandidateArea();
   const blockers=rackBlockers();
-  const step=.25;
+  const step=.5;
   let free=0;
 
   for(let x=candidate.x;x<candidate.x+candidate.w;x+=step){
     for(let y=candidate.y;y<candidate.y+candidate.h;y+=step){
-      const cell={x,y,w:Math.min(step,candidate.x+candidate.w-x),h:Math.min(step,candidate.y+candidate.h-y)};
+      const cell={
+        x,y,
+        w:Math.min(step,candidate.x+candidate.w-x),
+        h:Math.min(step,candidate.y+candidate.h-y)
+      };
       if(blockers.some(b=>rectsOverlap(cell,b))) continue;
-      free += area(cell);
+      free+=area(cell);
     }
   }
   return free;
 }
-
 
 function rackUsedArea(){
   const plan=rackPlan();
@@ -489,7 +571,7 @@ function analytics(){
   const storage=getZone('Хранение');
   const processArea=state.zones.filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)+state.objects.filter(o=>o.type==='process').reduce((s,o)=>s+area(o),0);
   const supportArea=state.zones.filter(z=>z.type!=='process'&&z.type!=='storage').reduce((s,z)=>s+netArea(z),0)+state.objects.filter(o=>o.type!=='process'&&o.type!=='storage').reduce((s,o)=>s+area(o),0);
-  return {rp,vol,cap100,cap,pm,cams,totalCams:cams.cams.length+other,area:state.roomL*state.roomW,storageArea:estimatedRackableArea(),processArea,supportArea,currentFOT,autoFOT,currentOpex:currentFOT+state.rent,autoOpex:autoFOT+state.rent,userCams};
+  return {rp,vol,cap100,cap,pm,cams,totalCams:cams.cams.length+other,area:state.roomL*state.roomW,storageArea:estimatedRackableArea(),processArea,supportArea,currentFOT,autoFOT,currentOpex:currentFOT+state.rent,autoOpex:autoFOT+state.rent,userCams,streetCount:rp.streetCount||0,rackFootprint:rp.rackArea||0};
 }
 
 
@@ -713,8 +795,7 @@ function draw(){
     }
   };
 
-  $('layoutSummary').textContent=
-    `Единая свободная площадь · секций ${a.rp.total} · занято стеллажами ${fmt1(rackUsedArea())} м² · свободный остаток ${fmt1(unusedRackableArea())} м² · камеры ${a.totalCams}`;
+  $('layoutSummary').textContent=`Свободная геометрия · улиц ${a.rp.streetCount||0} · секций ${a.rp.total} · стеллажи ${fmt1(a.rp.rackArea||0)} м² · свободный остаток ${fmt1(unusedRackableArea())} м² · ${a.rp.orientation==='horizontal'?'продольные':'поперечные'} улицы`;
 }
 function renderSelected(){
   const box=$('selectedEditor');
@@ -738,7 +819,7 @@ function renderSelected(){
   if($('selName'))$('selName').oninput=()=>{obj.name=$('selName').value;renderAll()};
   ['sx','sy','sw','sh'].forEach(id=>$(id).oninput=()=>{
     obj[{sx:'x',sy:'y',sw:'w',sh:'h'}[id]]=parseFloat($(id).value)||0;
-    if(obj.name==='Центральный проход')state.centralAisle=obj.h;renderAll();
+    if(obj.name==='Центральный проход')state.centralAisle=centralIsVertical()?obj.w:obj.h;renderAll();
   });
   if($('selType')){$('selType').value=obj.type;$('selType').onchange=()=>{obj.type=$('selType').value;renderAll()}}
   if($('capToggle'))$('capToggle').onchange=()=>{obj.affectsCapacity=$('capToggle').checked;renderAll()};
@@ -759,7 +840,7 @@ function renderColumns(){
 function renderEmu(){
   const m=processModel(state.simFlow),ok=m.util<=1,total=m.total||1;
   $('emulatorBody').innerHTML=`<div class="emugrid">
-  <div class="emukpi ${ok?'goodbg':'badbg'}"><span>Статус</span><b>${ok?'Поток проходит':'Выше мощности'}</b><small>${fmt(state.simFlow)} SKU/мес</small></div>
+  <div class="emukpi ${ok?'goodbg':'badbg'}"><span>Статус</span><b>${ok?'Поток проходит':'Выше мощности'}</b><small>${fmt(state.simFlow)} ШК/мес</small></div>
   <div class="emukpi"><span>Загрузка</span><b>${fmt1(m.util*100)}%</b></div>
   <div class="emukpi"><span>Минимум</span><b>${m.min} оп./смену</b></div>
   <div class="emukpi"><span>Рекомендуемо</span><b>${m.rec} оп./смену</b></div></div>
@@ -770,13 +851,13 @@ function tr(a,b,c,d){return `<tr><td>${a}</td><td>${b}</td>${c!==undefined?`<td>
 function metric(name,val,sub=''){return `<div class="metricrow"><span>${name}</span><b>${val}</b>${sub?`<small>${sub}</small>`:''}</div>`}
 function renderTabs(){
   const a=analytics(),pm=a.pm;
-  $('mArea').textContent=fmt1(a.area)+' м²';$('mCapacity').textContent=fmt(a.cap)+' SKU';$('mThroughput').textContent=fmt(pm.maxMonthly)+' SKU/мес';$('mCams').textContent=fmt(a.totalCams)+' шт.';$('mStaff').textContent=pm.rec+' оп./смену';
+  $('mArea').textContent=fmt1(a.area)+' м²';$('mCapacity').textContent=fmt(a.cap)+' ШК';$('mThroughput').textContent=fmt(pm.maxMonthly)+' ШК/мес';$('mCams').textContent=fmt(a.totalCams)+' шт.';$('mStaff').textContent=pm.rec+' оп./смену';
 
-  $('tab-capacity').innerHTML=`<div class="cards3">${metric('Площадь хранения',fmt1(a.storageArea)+' м²')}${metric('Секции',fmt(a.rp.total))}${metric('Рабочая вместимость',fmt(a.cap)+' SKU',state.fillPct+'% заполнения')}</div>
-  <table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr>${tr('Полезный объём',fmt1(a.vol)+' м³')}${tr('Вместимость 100%',fmt(a.cap100)+' SKU')}${tr('Рабочая вместимость',fmt(a.cap)+' SKU')}${tr('Центральный проход',fmt1(state.centralAisle)+' м · '+(centralIsVertical()?'вертикальный':'горизонтальный')+' · '+fmt1(area(getZone('Центральный проход')||{w:0,h:0}))+' м²')}</table>`;
+  $('tab-capacity').innerHTML=`<div class="cards3">${metric('Площадь хранения',fmt1(a.storageArea)+' м²')}${metric('Секции',fmt(a.rp.total))}${metric('Рабочая вместимость',fmt(a.cap)+' ШК',state.fillPct+'% заполнения')}</div>
+  <table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr>${tr('Полезный объём',fmt1(a.vol)+' м³')}${tr('Вместимость 100%',fmt(a.cap100)+' ШК')}${tr('Рабочая вместимость',fmt(a.cap)+' ШК')}${tr('Центральный проход',fmt1(state.centralAisle)+' м · '+(centralIsVertical()?'вертикальный':'горизонтальный')+' · '+fmt1(area(getZone('Центральный проход')||{w:0,h:0}))+' м²')}</table>`;
 
   const oneTurn=processModel(a.cap),avg=processModel(state.avgFlow||100000),mx=processModel(state.maxFlow||120000);
-  $('tab-throughput').innerHTML=`<div class="cards3">${metric('1 оборот рабочего стока',fmt(a.cap)+' SKU/мес',fmt(a.cap/30)+' SKU/сутки')}${metric('Средний рабочий',fmt(state.avgFlow||100000)+' SKU/мес',fmt1(avg.util*100)+'% загрузки')}${metric('Максимальный',fmt(state.maxFlow||120000)+' SKU/мес',fmt1(mx.util*100)+'% загрузки')}</div>
+  $('tab-throughput').innerHTML=`<div class="cards3">${metric('1 оборот рабочего стока',fmt(a.cap)+' ШК/мес',fmt(a.cap/30)+' ШК/сутки')}${metric('Средний рабочий',fmt(state.avgFlow||100000)+' ШК/мес',fmt1(avg.util*100)+'% загрузки')}${metric('Максимальный',fmt(state.maxFlow||120000)+' ШК/мес',fmt1(mx.util*100)+'% загрузки')}</div>
   <table class="tbl"><tr><th>Сценарий</th><th>Оборотов стока</th><th>Загрузка</th><th>Статус</th></tr>${tr('1 оборот',1,fmt1(oneTurn.util*100)+'%',oneTurn.util<=1?'проходит':'выше мощности')}${tr('Средний',((state.avgFlow||100000)/Math.max(1,a.cap)).toFixed(2),fmt1(avg.util*100)+'%',avg.util<=1?'проходит':'выше мощности')}${tr('Максимальный',((state.maxFlow||120000)/Math.max(1,a.cap)).toFixed(2),fmt1(mx.util*100)+'%',mx.util<=1?'проходит':'выше мощности')}${tr('Целевой',(state.targetFlow/Math.max(1,a.cap)).toFixed(2),fmt1(pm.util*100)+'%',pm.util<=1?'проходит':'выше мощности')}</table>`;
 
   $('tab-staff').innerHTML=`<div class="cards3">${metric('Минимум',pm.min+' оп./смену')}${metric('Рекомендуемо',pm.rec+' оп./смену','нагрузка до 85%')}${metric('Текущий состав',state.opsPerShift+' оп./смену',fmt1(pm.util*100)+'% загрузки')}</div>
@@ -792,13 +873,13 @@ function renderTabs(){
   $('tab-analytics').innerHTML=`<div class="cards3">${metric('ФОТ текущий',money(a.currentFOT))}${metric('ФОТ с автоштатом',money(a.autoFOT))}${metric('OPEX с арендой',money(a.currentOpex))}</div>
   <table class="tbl"><tr><th>Аналитика</th><th>Значение</th></tr>${tr('Доля площади, занятой стеллажами',fmt1(a.rackUsedArea/a.area*100)+'%')}
     ${tr('Неиспользуемая доступная площадь',fmt1(a.unusedRackableArea)+' м²')}${tr('Доля процессных зон',fmt1(a.processArea/a.area*100)+'%')}${tr('Доля staff/service',fmt1(a.supportArea/a.area*100)+'%')}${tr('Секций на 1 м²',fmt1(a.rp.total/a.area))}
-    ${tr('Алгоритм размещения стеллажей','автозаполнение всей свободной рабочей площади')}${tr('SKU на 1 м²',fmt1(a.cap/a.area))}${tr('Сборка',route+' · площадь 1 этажа не занимает')}${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' SKU/мес')}${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' SKU/мес')}${tr('CAPEX',money(state.capex||2921881))}${tr('Аренда',money(state.rent||300000))}</table>`;
+    ${tr('Алгоритм размещения стеллажей','автозаполнение всей свободной рабочей площади')}${tr('SKU на 1 м²',fmt1(a.cap/a.area))}${tr('Сборка',route+' · площадь 1 этажа не занимает')}${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' ШК/мес')}${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' ШК/мес')}${tr('CAPEX',money(state.capex||2921881))}${tr('Аренда',money(state.rent||300000))}</table>`;
 
   const warns=[],central=getZone('Центральный проход');
   if(central&&central.h<1.2)warns.push(['bad','Центральный проход меньше 1,2 м.']);
   if(state.aisle<1)warns.push(['bad','Проход между стеллажными рядами меньше 1 м.']);
   if(a.cams.uncovered.length)warns.push(['bad',`Есть ${a.cams.uncovered.length} контрольных точек без покрытия камер.`]);else warns.push(['good','Мёртвых зон по модели камер нет.']);
-  if(pm.util>1)warns.push(['bad',`Целевой поток ${fmt(state.targetFlow)} SKU/мес выше мощности текущей команды.`]);
+  if(pm.util>1)warns.push(['bad',`Целевой поток ${fmt(state.targetFlow)} ШК/мес выше мощности текущей команды.`]);
   if(central){const rc=rackCandidateArea();if(!rectsOverlap(rc,central))warns.push(['bad','Центральный проход находится вне рабочей складской площади.']);}
   if(central){
     const rc=rackCandidateArea();
@@ -903,8 +984,10 @@ function deleteSelected(){
 
   if(selected.kind==='zone'){
     const z=arr[selected.index];
-    if(z && ['Хранение','Центральный проход'].includes(z.name)){
-      alert('Эту системную зону лучше не удалять. Можно переместить или изменить её размер.');
+    // Legacy "Хранение" скрыто и не используется.
+    // Центральный проход теперь опционален: его можно удалить.
+    if(z && z.name==='Хранение'){
+      alert('Системная зона совместимости "Хранение" не используется в расчете.');
       return;
     }
   }
@@ -924,13 +1007,30 @@ inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id
   }
 }renderAll()}});
 $('layoutMode').value=state.layoutMode;$('layoutMode').onchange=()=>{state.layoutMode=$('layoutMode').value;renderAll()};
-$('optBtn').onclick=optimize;$('optSideBtn').onclick=optimize;$('centerAisleBtn').onclick=()=>{centerCentralAisle();renderAll();};
+$('optBtn').onclick=optimize;
+$('optSideBtn').onclick=optimize;
+$('centerAisleBtn').onclick=()=>{
+  let c=getZone('Центральный проход');
+  if(!c){
+    const b=rackCandidateArea();
+    c={
+      name:'Центральный проход',type:'service',
+      x:b.x+b.w/2-state.centralAisle/2,y:b.y,
+      w:state.centralAisle,h:b.h,
+      rotation:90,
+      affectsCapacity:true,affectsFlow:true,needsCamera:false
+    };
+    state.zones.push(c);
+  }
+  centerCentralAisle();
+  renderAll();
+};
 $('addColumnBtn').onclick=()=>{state.columns.push({x:6,y:3,w:.6,h:.6,rotation:0});selected={kind:'column',index:state.columns.length-1};renderAll()};
 document.querySelectorAll('.objbtn').forEach(b=>b.onclick=()=>addTemplate(b.dataset.template));
 $('rotateBtn').onclick=()=>rotateSelected();$('cloneBtn').onclick=()=>cloneSelected();$('deleteBtn').onclick=()=>deleteSelected();
 $('saveBtn').onclick=()=>save();
 $('resetBtn').onclick=()=>{if(confirm('Сбросить проект?')){state=structuredClone(defaults);initZones();selected={kind:null};inputIds.forEach(id=>$(id).value=state[id]);renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v6.json';a.click();URL.revokeObjectURL(a.href)};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.4.2.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));selected={kind:null};inputIds.forEach(id=>$(id).value=state[id]);$('layoutMode').value=state.layoutMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
