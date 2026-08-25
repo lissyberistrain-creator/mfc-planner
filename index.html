@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 7.4.4</title>
-  <link rel="stylesheet" href="styles.css?v=7.4.4">
+  <title>MFC Planner 7.5</title>
+  <link rel="stylesheet" href="styles.css?v=7.5">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">7.4.4</span></div>
+    <div class="brand">MFC Planner <span class="ver">7.5</span></div>
     <div class="sub">Интерактивный конструктор: зоны, объекты, повороты, центральный проход, камеры, колонны и сквозной поток</div>
   </div>
   <div class="actions">
@@ -60,14 +60,26 @@
   </section>
 
   <section class="panel optimizer-panel">
-    <div class="headrow"><h3>Варианты планировки</h3><span class="badge-lite">лёгкий расчёт</span></div>
-    <button id="findVariantsBtn" class="btn primary wide optimizer-find">Найти лучшие варианты</button>
-    <label>Выбрать вариант
-      <select id="variantSelect"><option value="">Сначала нажми «Найти варианты»</option></select>
+    <div class="headrow"><h3>Optimizer 7.5</h3><span class="badge-lite">ТОП-10</span></div>
+    <label>Цель поиска
+      <select id="optimizerGoal">
+        <option value="capacity">Максимум хранения</option>
+        <option value="balanced">Баланс</option>
+        <option value="flow">Максимальный поток</option>
+      </select>
     </label>
-    <div id="variantDetails" class="variant-details"><div class="hint">Сравним максимум хранения, баланс и максимальный поток.</div></div>
-    <button id="applyVariantBtn" class="btn secondary wide">Применить выбранный вариант</button>
-    <div class="hint">После применения можно сохранить вариант отдельным планом через «Сохранить план».</div>
+    <button id="findVariantsBtn" class="btn primary wide optimizer-find">Найти ТОП-10 вариантов</button>
+    <div id="optimizerStats" class="optimizer-stats"><span>Поиск ещё не запускался</span></div>
+    <label>Найденные варианты
+      <select id="variantSelect"><option value="">Сначала нажми «Найти ТОП-10»</option></select>
+    </label>
+    <div id="variantDetails" class="variant-details"><div class="hint">Сравним найденную схему с текущим планом.</div></div>
+    <div class="optimizer-actions">
+      <button id="previewVariantBtn" class="btn secondary wide">Показать прирост на плане</button>
+      <button id="applyVariantBtn" class="btn secondary wide">Применить выбранный вариант</button>
+      <button id="fillStorageBtn" class="btn primary wide">Дозаполнить хранение</button>
+    </div>
+    <div class="hint">Зелёным показываются дополнительные секции. «Дозаполнить хранение» применяет абсолютный максимум по секциям.</div>
   </section>
 
   <section class="panel">
@@ -208,6 +220,6 @@
 </main>
 </div>
 
-<script src="app.js?v=7.4.4"></script>
+<script src="app.js?v=7.5"></script>
 </body>
 </html>

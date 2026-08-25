@@ -94,3 +94,10 @@ h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9
 .variant-kpis{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:7px}
 .variant-kpis div{background:#fff;border:1px solid #eee4f4;border-radius:9px;padding:8px}
 .variant-kpis span{display:block;font-size:10px;color:#7b6f85}.variant-kpis b{display:block;font-size:14px;color:#532b7b;margin-top:3px}
+
+/* MFC Planner 7.5 */
+.optimizer-actions{display:grid;grid-template-columns:1fr;gap:7px;margin-top:8px}
+.optimizer-stats{display:grid;gap:4px;padding:9px 10px;margin:8px 0 10px;background:#f6f0fb;border:1px solid #e5d6ef;border-radius:10px;font-size:11px;color:#6d6077}
+.optimizer-stats b{color:#4d2671;font-size:12px}.optimizer-stats span{display:block}
+.variant-kpis small{display:block;margin-top:3px;color:#8b7d95;font-size:9px}
+.rackPreview{fill:#83c98c;stroke:#287a39;stroke-width:1.2;opacity:.82;pointer-events:none}

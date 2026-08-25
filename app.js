@@ -680,6 +680,17 @@ function draw(){
     });
   });
 
+  // Optimizer 7.5: зелёный preview дополнительных секций.
+  (optimizerPreviewRacks||[]).forEach(r=>{
+    add('rect',{
+      x:ox+r.x*sc+2,
+      y:oy+r.y*sc+2,
+      width:Math.max(2,r.w*sc-4),
+      height:Math.max(2,r.h*sc-4),
+      class:'rackPreview'
+    });
+  });
+
   // Теперь рисуем реальные интерактивные зоны поверх складской геометрии.
   state.zones.forEach((z,idx)=>{
     if(z.name==='Хранение') return; // legacy zone больше не рисуем
@@ -1161,97 +1172,145 @@ function autosaveCurrentProject(){
 }
 
 
-const VARIANT_KEY='mfcPlannerVariantsV744';
+const VARIANT_KEY='mfcPlannerVariantsV75';
 let optimizerVariants=[];
 let optimizerBaseState=null;
+let optimizerAllCandidates=[];
+let optimizerSearchCount=0;
+let optimizerCurrentMetrics=null;
+let optimizerPreviewRacks=[];
+
 
 function setCentralAisleConfig(config){
   state.zones=(state.zones||[]).filter(z=>z.name!=='Центральный проход');
-  if(!config||config.enabled===false)return;
+  if(!config || config.enabled===false) return;
 
   const b=rackCandidateArea();
-  const width=clamp(Number(config.width)||1.2,1.0,2.6);
+  const width=clamp(Number(config.width)||1.2,0.9,2.6);
+  const position=clamp(config.position??.5,0,1);
+
   if(config.orientation==='horizontal'){
-    const y=b.y+(b.h-width)*clamp(config.position??.5,0,1);
+    const y=b.y+(b.h-width)*position;
     state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',x:b.x,y,w:b.w,h:width,rotation:0,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
   }else{
-    const x=b.x+(b.w-width)*clamp(config.position??.5,0,1);
+    const x=b.x+(b.w-width)*position;
     state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',x,y:b.y,w:width,h:b.h,rotation:90,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
   }
   state.centralAisle=width;
+}
+
+function capacityFromRackPlan(rp){
+  const volume=rp.total*state.rackL*state.rackD*state.rackH;
+  return volume*1000/Math.max(.1,state.avgSkuL)*state.fillPct/100;
+}
+
+function optimizerFreeArea(rp){
+  return Math.max(0,estimatedRackableArea()-(rp.rackArea||0));
 }
 
 function evaluateLayoutCandidate(base,config,label){
   state=JSON.parse(JSON.stringify(base));
   sanitizeState();migrateSmartZones();migrateV69();
   setCentralAisleConfig(config);
-  const rp=rackPlan();
-  const rackable=estimatedRackableArea();
-  const free=Math.max(0,rackable-(rp.rackArea||0));
-  const volume=rp.total*state.rackL*state.rackD*state.rackH;
-  const capacity=volume*1000/Math.max(.1,state.avgSkuL)*state.fillPct/100;
 
-  let centrality=0;
-  if(config&&config.enabled!==false){
+  const rp=rackPlan();
+  const capacity=capacityFromRackPlan(rp);
+  const free=optimizerFreeArea(rp);
+
+  let centrality=0,crossAccess=0,aisleScore=0;
+  if(config && config.enabled!==false){
     centrality=1-Math.min(1,Math.abs((config.position??.5)-.5)*2);
+    crossAccess=1;
+    aisleScore=Math.min(1,(config.width||1)/1.6);
   }
+
   return {
-    id:'v_'+Math.random().toString(36).slice(2,9),
+    id:'v_'+Math.random().toString(36).slice(2,10),
     label,
     config:config?JSON.parse(JSON.stringify(config)):{enabled:false},
     sections:rp.total,
     streets:rp.streetCount||0,
-    capacity,
-    free,
+    capacity,free,
     rackArea:rp.rackArea||0,
     orientation:rp.orientation,
-    centrality,
+    centrality,crossAccess,aisleScore,
+    racks:(rp.racks||[]).map(r=>({x:r.x,y:r.y,w:r.w,h:r.h})),
     snapshot:JSON.parse(JSON.stringify(state))
   };
+}
+
+function optimizerCurrentPlanMetrics(){
+  const rp=rackPlan();
+  return {
+    sections:rp.total,
+    capacity:capacityFromRackPlan(rp),
+    free:optimizerFreeArea(rp),
+    rackArea:rp.rackArea||0,
+    streets:rp.streetCount||0,
+    racks:(rp.racks||[]).map(r=>({x:r.x,y:r.y,w:r.w,h:r.h}))
+  };
+}
+
+function candidateScore(v,goal,n){
+  const sections=v.sections/n.maxSections;
+  const used=1-(v.free/n.maxFree);
+  const streets=Math.min(1,v.streets/n.maxStreets);
+  if(goal==='flow') return v.crossAccess*35+v.centrality*25+v.aisleScore*15+sections*15+streets*10;
+  if(goal==='balanced') return sections*58+v.crossAccess*14+v.centrality*13+used*10+streets*5;
+  return sections*90+used*7+streets*3;
 }
 
 function findBestVariants(){
   const original=JSON.parse(JSON.stringify(state));
   optimizerBaseState=JSON.parse(JSON.stringify(state));
-  const candidates=[];
+  optimizerCurrentMetrics=optimizerCurrentPlanMetrics();
+  optimizerPreviewRacks=[];
 
-  // Без ЦП — обязательный кандидат для реального максимума хранения.
+  const candidates=[];
   candidates.push(evaluateLayoutCandidate(optimizerBaseState,{enabled:false},'Без ЦП'));
 
-  const widths=[1.0,1.2,1.4,1.6];
-  const positions=[.35,.5,.65];
+  const widths=[1.0,1.2,1.4,1.6,1.8];
+  const positions=[.20,.30,.40,.50,.60,.70,.80];
+
   ['vertical','horizontal'].forEach(orientation=>{
     widths.forEach(width=>positions.forEach(position=>{
-      candidates.push(evaluateLayoutCandidate(optimizerBaseState,{enabled:true,orientation,width,position},`${orientation==='vertical'?'Вертикальный':'Горизонтальный'} ЦП ${width} м`));
+      candidates.push(evaluateLayoutCandidate(
+        optimizerBaseState,
+        {enabled:true,orientation,width,position},
+        `${orientation==='vertical'?'Вертикальный':'Горизонтальный'} ЦП ${width} м · ${Math.round(position*100)}%`
+      ));
     }));
   });
 
-  const maxSections=Math.max(1,...candidates.map(v=>v.sections));
-  const maxFree=Math.max(1,...candidates.map(v=>v.free));
+  optimizerAllCandidates=candidates;
+  optimizerSearchCount=candidates.length*8;
 
-  const storage=[...candidates].sort((a,b)=>b.sections-a.sections || a.free-b.free)[0];
-  const balanced=[...candidates].filter(v=>v.config.enabled!==false).sort((a,b)=>{
-    const sa=(a.sections/maxSections)*70+a.centrality*25+(1-a.free/maxFree)*5;
-    const sb=(b.sections/maxSections)*70+b.centrality*25+(1-b.free/maxFree)*5;
-    return sb-sa;
-  })[0]||storage;
-  const flow=[...candidates].filter(v=>v.config.enabled!==false).sort((a,b)=>{
-    const aw=(a.config.width||0),bw=(b.config.width||0);
-    const sa=a.centrality*45+Math.min(1,aw/1.6)*35+(a.sections/maxSections)*20;
-    const sb=b.centrality*45+Math.min(1,bw/1.6)*35+(b.sections/maxSections)*20;
-    return sb-sa;
-  })[0]||balanced;
+  const n={
+    maxSections:Math.max(1,...candidates.map(v=>v.sections)),
+    maxFree:Math.max(1,...candidates.map(v=>v.free)),
+    maxStreets:Math.max(1,...candidates.map(v=>v.streets))
+  };
 
-  const seen=new Set();
-  optimizerVariants=[];
-  [
-    {...storage,mode:'capacity',title:'Максимум хранения'},
-    {...balanced,mode:'balanced',title:'Баланс'},
-    {...flow,mode:'flow',title:'Максимальный поток'}
-  ].forEach(v=>{
-    const key=JSON.stringify(v.config);
-    if(!seen.has(v.mode+key)){seen.add(v.mode+key);optimizerVariants.push(v)}
+  const goal=$('optimizerGoal')?.value||'capacity';
+  candidates.forEach(v=>{
+    v.score=candidateScore(v,goal,n);
+    v.deltaSections=v.sections-optimizerCurrentMetrics.sections;
+    v.deltaCapacity=v.capacity-optimizerCurrentMetrics.capacity;
+    v.extraRackArea=Math.max(0,v.deltaSections)*state.rackL*state.rackD;
   });
+
+  const seen=new Set(),unique=[];
+  [...candidates]
+    .sort((a,b)=>b.score-a.score||b.sections-a.sections||a.free-b.free)
+    .forEach(v=>{
+      const key=[v.sections,v.streets,Math.round(v.free*10),v.orientation,
+        v.config.enabled===false?'none':v.config.orientation,
+        v.config.enabled===false?0:Math.round((v.config.width||0)*10),
+        v.config.enabled===false?0:Math.round((v.config.position||0)*100)].join('|');
+      if(!seen.has(key)){seen.add(key);unique.push(v)}
+    });
+
+  optimizerVariants=unique.slice(0,10).map((v,i)=>({...v,rank:i+1,title:`#${i+1}`}));
 
   state=original;
   sanitizeState();migrateSmartZones();migrateV69();
@@ -1260,42 +1319,95 @@ function findBestVariants(){
 }
 
 function renderVariantSelector(){
-  const sel=$('variantSelect');
-  const box=$('variantDetails');
+  const sel=$('variantSelect'),box=$('variantDetails'),stats=$('optimizerStats');
   if(!sel||!box)return;
   if(!optimizerVariants.length){
-    sel.innerHTML='<option value="">Сначала нажми «Найти варианты»</option>';
-    box.innerHTML='<div class="hint">Проверяются варианты с ЦП и без ЦП. Расчёт лёгкий и не запускает камеры для каждого сценария.</div>';
+    sel.innerHTML='<option value="">Сначала нажми «Найти ТОП-10»</option>';
+    box.innerHTML='<div class="hint">Проверим сотни внутренних раскладок.</div>';
+    if(stats)stats.innerHTML='<span>Поиск ещё не запускался</span>';
     return;
   }
-  sel.innerHTML=optimizerVariants.map((v,i)=>`<option value="${i}">${v.title}: ${fmt(v.sections)} секций · ${fmt(v.capacity)} ШК</option>`).join('');
+
+  sel.innerHTML=optimizerVariants.map((v,i)=>{
+    const plus=v.deltaSections>0?` · +${fmt(v.deltaSections)} сек.`:'';
+    return `<option value="${i}">#${i+1}: ${fmt(v.sections)} секций · ${fmt(v.capacity)} ШК${plus}</option>`;
+  }).join('');
+
+  if(stats){
+    const best=Math.max(...optimizerAllCandidates.map(v=>v.sections));
+    const delta=best-(optimizerCurrentMetrics?.sections||0);
+    stats.innerHTML=`<b>Проверено ${fmt(optimizerSearchCount)} внутренних раскладок</b>
+      <span>Текущий план: ${fmt(optimizerCurrentMetrics?.sections||0)} секций</span>
+      <span>Максимум: ${fmt(best)} секций ${delta>0?`(+${fmt(delta)})`:'(текущий уже максимум)'}</span>`;
+  }
   showVariantDetails(0);
 }
 
+function selectedOptimizerVariant(){
+  return optimizerVariants[Number($('variantSelect')?.value)];
+}
+
 function showVariantDetails(index){
-  const v=optimizerVariants[Number(index)];
-  const box=$('variantDetails');
+  optimizerPreviewRacks=[];
+  const v=optimizerVariants[Number(index)],box=$('variantDetails');
   if(!v||!box)return;
-  const cp=v.config.enabled===false?'без ЦП':`${v.config.orientation==='vertical'?'вертикальный':'горизонтальный'} ЦП ${fmt1(v.config.width)} м`;
+  const cp=v.config.enabled===false?'без ЦП':`${v.config.orientation==='vertical'?'вертикальный':'горизонтальный'} ЦП ${fmt1(v.config.width)} м · ${Math.round((v.config.position||0)*100)}%`;
   box.innerHTML=`<div class="variant-kpis">
-    <div><span>Секции</span><b>${fmt(v.sections)}</b></div>
-    <div><span>Вместимость</span><b>${fmt(v.capacity)} ШК</b></div>
+    <div><span>Секции</span><b>${fmt(v.sections)}</b><small>${v.deltaSections>0?'+'+fmt(v.deltaSections):fmt(v.deltaSections)} к текущему</small></div>
+    <div><span>Вместимость</span><b>${fmt(v.capacity)} ШК</b><small>${v.deltaCapacity>0?'+'+fmt(v.deltaCapacity):fmt(v.deltaCapacity)} ШК</small></div>
     <div><span>Улицы</span><b>${fmt(v.streets)}</b></div>
-    <div><span>Свободно</span><b>${fmt1(v.free)} м²</b></div>
-  </div><div class="hint">${cp} · стеллажи ${v.orientation==='horizontal'?'продольные':'поперечные'}</div>`;
+    <div><span>Свободный остаток</span><b>${fmt1(v.free)} м²</b></div>
+    <div><span>Доп. footprint</span><b>${fmt1(v.extraRackArea)} м²</b></div>
+    <div><span>Рейтинг</span><b>${fmt1(v.score)}/100</b></div>
+  </div><div class="hint">${cp} · улицы ${v.orientation==='horizontal'?'продольные':'поперечные'}</div>`;
+}
+
+function rackKey(r){
+  return [Math.round(r.x*100),Math.round(r.y*100),Math.round(r.w*100),Math.round(r.h*100)].join('|');
+}
+
+function previewSelectedVariant(){
+  const v=selectedOptimizerVariant();
+  if(!v)return alert('Сначала найди и выбери вариант.');
+  const current=rackPlan();
+  const keys=new Set((current.racks||[]).map(rackKey));
+  optimizerPreviewRacks=(v.racks||[]).filter(r=>!keys.has(rackKey(r))).map(r=>({...r}));
+  draw();
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent=optimizerPreviewRacks.length
+    ?`Зелёным показано ${optimizerPreviewRacks.length} дополнительных секций.`
+    :'Дополнительных секций относительно текущего плана нет.';
 }
 
 function applySelectedVariant(){
-  const v=optimizerVariants[Number($('variantSelect')?.value)];
+  const v=selectedOptimizerVariant();
   if(!v)return alert('Сначала найди и выбери вариант.');
+  optimizerPreviewRacks=[];
   state=JSON.parse(JSON.stringify(v.snapshot));
-  state.layoutMode=v.mode;
   sanitizeState();migrateSmartZones();migrateV69();
   inputIds.forEach(k=>{if($(k))$(k).value=state[k]});
   if($('layoutMode'))$('layoutMode').value=state.layoutMode;
   selected={kind:null,index:null};
   renderAll();
-  if($('projectSaveStatus'))$('projectSaveStatus').textContent=`Применён вариант «${v.title}». Сохрани его под отдельным названием.`;
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent=`Применён вариант #${v.rank}.`;
+}
+
+function fillStorageToMaximum(){
+  if(!optimizerAllCandidates.length)findBestVariants();
+  const max=[...optimizerAllCandidates].sort((a,b)=>b.sections-a.sections||a.free-b.free)[0];
+  if(!max)return alert('Не удалось подобрать вариант.');
+  const before=optimizerCurrentMetrics?.sections??rackPlan().total;
+  optimizerPreviewRacks=[];
+  state=JSON.parse(JSON.stringify(max.snapshot));
+  state.layoutMode='capacity';
+  sanitizeState();migrateSmartZones();migrateV69();
+  inputIds.forEach(k=>{if($(k))$(k).value=state[k]});
+  if($('layoutMode'))$('layoutMode').value=state.layoutMode;
+  selected={kind:null,index:null};
+  renderAll();
+  if($('projectSaveStatus')){
+    const delta=max.sections-before;
+    $('projectSaveStatus').textContent=delta>0?`Хранение дозаполнено: +${fmt(delta)} секций.`:'Текущий план уже соответствует максимуму.';
+  }
 }
 
 const inputIds=['roomL','roomW','roomH','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','cameraRange','coverageStep'];
@@ -1334,10 +1446,13 @@ $('duplicateProjectBtn').onclick=()=>saveNamedProject(true);
 $('deleteProjectBtn').onclick=deleteCurrentProject;
 $('projectSelect').onchange=()=>{if($('projectSelect').value)openProject($('projectSelect').value)};
 $('findVariantsBtn').onclick=findBestVariants;
-$('variantSelect').onchange=()=>showVariantDetails($('variantSelect').value);
+$('optimizerGoal').onchange=()=>{if(optimizerAllCandidates.length)findBestVariants();};
+$('variantSelect').onchange=()=>{optimizerPreviewRacks=[];showVariantDetails($('variantSelect').value);draw();};
+$('previewVariantBtn').onclick=previewSelectedVariant;
 $('applyVariantBtn').onclick=applySelectedVariant;
+$('fillStorageBtn').onclick=fillStorageToMaximum;
 $('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>$(id).value=state[id]);renderProjectSelector();renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.4.4.json';a.click();URL.revokeObjectURL(a.href)};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.5.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));selected={kind:null};inputIds.forEach(id=>$(id).value=state[id]);$('layoutMode').value=state.layoutMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
