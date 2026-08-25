@@ -5,7 +5,7 @@
 .layout{display:grid;grid-template-columns:390px 1fr}.sidebar{padding:16px;background:#faf8fc;border-right:1px solid #e8dff0}.main{padding:18px;min-width:0}
 .panel{background:#fff;border:1px solid #e9e1ef;border-radius:16px;padding:14px;margin-bottom:14px;box-shadow:0 4px 16px rgba(65,31,92,.05)}.emphasis{background:linear-gradient(160deg,#fff,#faf5ff)}
 h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}label{font-size:12px;font-weight:700;color:#746a7f;display:flex;flex-direction:column;gap:5px}input,select{border:1px solid #ddd2e7;border-radius:10px;padding:8px;background:#fff}.hint{font-size:12px;color:#776d82}
-.hero{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:14px}.card{background:#fff;border:1px solid #e9e1ef;border-radius:16px;padding:16px}.card span{display:block;font-size:12px;color:#776d82}.card b{display:block;margin-top:8px;font-size:21px;color:#552d81}
+.hero{display:grid;grid-template-columns:repeat(7,1fr);gap:12px;margin-bottom:14px}.card{background:#fff;border:1px solid #e9e1ef;border-radius:16px;padding:16px}.card span{display:block;font-size:12px;color:#776d82}.card b{display:block;margin-top:8px;font-size:21px;color:#552d81}
 .rowhead,.headrow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#776d82}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}.dot.storage{background:#d8bdf0}.dot.process{background:#f4c2dc}.dot.staff{background:#c7d5ef}.dot.service{background:#d5ddcf}.dot.column{background:#6d6d75}.dot.cam{background:#3f2463}
 .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}.tool,.mini{border:0;border-radius:9px;padding:7px 10px;background:#f1e8fa;color:#5f2f8f;font-weight:700;cursor:pointer}.tool.active{background:#5f2f8f;color:#fff}
 .canvaswrap{background:#fcfbfd;border:1px dashed #dacfe6;border-radius:14px;padding:8px}#plan{width:100%;height:590px;display:block}.room{fill:#fff;stroke:#2b1b38;stroke-width:3}.grid{stroke:#eee7f5;stroke-width:1}.zone{stroke:#fff;stroke-width:2}.selected{stroke:#25132f!important;stroke-width:4!important}.label{font-size:13px;font-weight:800;fill:#271b33}.sub{font-size:10px;fill:#52465d}.rack{fill:#553573}.column{fill:#666874;stroke:#fff;stroke-width:1}.cam{fill:#3f2463;stroke:#fff}.camarc{fill:none;stroke:#3f2463;stroke-width:1.5}.dead{fill:#d53b68}.handle{fill:#fff;stroke:#2b1b38;stroke-width:2}
@@ -129,3 +129,20 @@ h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9
 @media(max-width:1050px){
   .validation-summary{grid-template-columns:repeat(2,1fr)}
 }
+
+
+/* MFC Planner 7.7 — Levels / Mezzanine */
+.level-panel{border-color:#d9c7e8;background:linear-gradient(160deg,#fff,#fbf7ff)}
+.level-switch{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.level-btn{border:1px solid #dfd0ed;background:#f4eef9;color:#62378c;border-radius:10px;padding:8px 10px;font-weight:800;cursor:pointer}
+.level-btn.active{background:#613694;color:#fff;border-color:#613694}
+.level-badge{font-size:10px;font-weight:800;padding:4px 8px;border-radius:999px;background:#f0e6f8;color:#5e3188}
+.level-dims{margin-top:10px}
+.plan-levelbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 4px;padding:9px 10px;background:#faf6fd;border:1px solid #eadff2;border-radius:12px}
+.plan-levelbar .level-switch{width:260px}
+.plan-levelbar b{font-size:12px;color:#5c347d}
+.mezzanineRoom{fill:#fffdf7;stroke:#7b5f36;stroke-dasharray:8 5}
+.levelCanvasTitle{font-size:14px;font-weight:800;fill:#7b5f36}
+.levelFlow span{display:flex;flex-direction:column;align-items:center;gap:2px}
+.levelFlow small{font-size:9px;font-weight:700;opacity:.68}
+@media(max-width:1500px){.hero{grid-template-columns:repeat(4,1fr)}}

@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 7.6</title>
-  <link rel="stylesheet" href="styles.css?v=7.6">
+  <title>MFC Planner 7.7</title>
+  <link rel="stylesheet" href="styles.css?v=7.7">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">7.6</span></div>
-    <div class="sub">Интерактивный конструктор: планировка, оптимизация, проверка доступности улиц и сквозной поток</div>
+    <div class="brand">MFC Planner <span class="ver">7.7</span></div>
+    <div class="sub">Интерактивный конструктор: 1 этаж + мезонин, оптимизация хранения, проверки и сквозной поток</div>
   </div>
   <div class="actions">
     <div class="project-switcher">
@@ -41,6 +41,19 @@
       <label>Высота, м<input id="roomH" type="number" step="0.1"></label>
       <label>Средний объём ШК, л<input id="avgSkuL" type="number" step="0.1"></label>
     </div>
+  </section>
+
+  <section class="panel level-panel">
+    <div class="headrow"><h3>Уровни 7.7</h3><span id="activeLevelBadge" class="level-badge">1 этаж</span></div>
+    <div class="level-switch">
+      <button type="button" class="level-btn active" data-level-switch="ground">1 этаж</button>
+      <button type="button" class="level-btn" data-level-switch="mezzanine">Мезонин</button>
+    </div>
+    <div class="grid2 level-dims">
+      <label>Мезонин, длина<input id="mezzanineL" type="number" step="0.1"></label>
+      <label>Мезонин, ширина<input id="mezzanineW" type="number" step="0.1"></label>
+    </div>
+    <div class="hint">Стеллажная вместимость считается по 1 этажу. Зоны мезонина участвуют в процессах, но не блокируют хранение внизу.</div>
   </section>
 
   <section class="panel emphasis">
@@ -161,6 +174,8 @@
       <button class="objbtn" data-template="buffer_out">Буфер отгрузки</button>
       <button class="objbtn" data-template="packing">Упаковка</button>
       <button class="objbtn" data-template="quality">Контроль качества</button>
+      <button class="objbtn" data-template="picking">Сборка</button>
+      <button class="objbtn" data-template="vertical">Лестница / подъёмник</button>
       <button class="objbtn" data-template="pallet">Паллетная зона</button>
       <button class="objbtn" data-template="charging">Зарядка ТСД</button>
       <button class="objbtn" data-template="table">Стол</button>
@@ -178,7 +193,8 @@
 
 <main class="main">
   <section class="hero">
-    <div class="card"><span>Площадь</span><b id="mArea"></b></div>
+    <div class="card"><span>Площадь 1 этажа</span><b id="mArea"></b></div>
+    <div class="card"><span>Площадь мезонина</span><b id="mMezzArea"></b></div>
     <div class="card"><span>Рабочая вместимость</span><b id="mCapacity"></b></div>
     <div class="card"><span>Макс. сквозной поток</span><b id="mThroughput"></b></div>
     <div class="card"><span>Камер</span><b id="mCams"></b></div>
@@ -201,6 +217,13 @@
         <span><i class="dot cam"></i>Камера</span>
         <span><i class="dot validation"></i>Проблема маршрута</span>
       </div>
+    </div>
+    <div class="plan-levelbar">
+      <div class="level-switch">
+        <button type="button" class="level-btn active" data-level-switch="ground">1 этаж</button>
+        <button type="button" class="level-btn" data-level-switch="mezzanine">Мезонин</button>
+      </div>
+      <b id="planLevelBadge">1 этаж</b>
     </div>
     <div class="toolbar">
       <span>Режим:</span>
@@ -232,6 +255,7 @@
       <button class="tab" data-tab="staff">Персонал</button>
       <button class="tab" data-tab="video">Камеры</button>
       <button class="tab" data-tab="equip">Оборудование</button>
+      <button class="tab" data-tab="levels">Уровни</button>
       <button class="tab" data-tab="analytics">Аналитика</button>
       <button class="tab" data-tab="checks">Проверки</button>
     </div>
@@ -240,12 +264,13 @@
     <div id="tab-staff" class="tabcontent"></div>
     <div id="tab-video" class="tabcontent"></div>
     <div id="tab-equip" class="tabcontent"></div>
+    <div id="tab-levels" class="tabcontent"></div>
     <div id="tab-analytics" class="tabcontent"></div>
     <div id="tab-checks" class="tabcontent"></div>
   </section>
 </main>
 </div>
 
-<script src="app.js?v=7.6"></script>
+<script src="app.js?v=7.7"></script>
 </body>
 </html>

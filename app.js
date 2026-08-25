@@ -19,15 +19,16 @@ const names={accept:'Приёмка',putaway:'Раскладка',pick:'Сбор
 
 const defaults={
   roomL:20,roomW:10,roomH:3,avgSkuL:4.5,targetFlow:100000,simFlow:100000,layoutMode:'balanced',
+  activeLevel:'ground',mezzanineL:20,mezzanineW:10,
   centralAisle:1.6,rackL:1.2,rackD:0.5,rackH:2.5,shelves:5,aisle:1.2,fillPct:95,
   normAccept:2750,normPutaway:2750,normPick:1500,normShip:3500,
   opsPerShift:3,shiftsPerDay:2,paidHours:11,opRate:400,seniors:2,seniorSalary:90000,managers:1,managerSalary:130000,
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV76')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerV77')||'null');
 if(!state){
-  const previousKeys=['mfcPlannerV744','mfcPlannerV743','mfcPlannerV742','mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
+  const previousKeys=['mfcPlannerV76','mfcPlannerV744','mfcPlannerV743','mfcPlannerV742','mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
   for(const key of previousKeys){
     try{
       const candidate=JSON.parse(localStorage.getItem(key)||'null');
@@ -41,7 +42,7 @@ for(const k in defaults){if(state[k]===undefined) state[k]=structuredClone(defau
 
 function sanitizeState(){
   const numericKeys=[
-    'roomL','roomW','roomH','avgSkuL','targetFlow','simFlow','centralAisle',
+    'roomL','roomW','roomH','mezzanineL','mezzanineW','avgSkuL','targetFlow','simFlow','centralAisle',
     'rackL','rackD','rackH','shelves','aisle','fillPct',
     'normAccept','normPutaway','normPick','normShip',
     'opsPerShift','shiftsPerDay','paidHours','opRate',
@@ -58,11 +59,45 @@ function sanitizeState(){
     }
   });
   if(!state.layoutMode) state.layoutMode=defaults.layoutMode;
+  if(!['ground','mezzanine'].includes(state.activeLevel)) state.activeLevel='ground';
+  state.mezzanineL=Math.max(2,Number(state.mezzanineL)||state.roomL||20);
+  state.mezzanineW=Math.max(2,Number(state.mezzanineW)||state.roomW||10);
   if(!Array.isArray(state.zones)) state.zones=[];
   if(!Array.isArray(state.columns)) state.columns=[];
   if(!Array.isArray(state.objects)) state.objects=[];
 }
 sanitizeState();
+
+function entityLevel(o){
+  if(!o) return 'ground';
+  return o.level||'ground';
+}
+function onLevel(o,level=state.activeLevel){
+  const l=entityLevel(o);
+  return l==='both'||l===level;
+}
+function levelDims(level=state.activeLevel){
+  return level==='mezzanine'
+    ? {L:Math.max(2,state.mezzanineL),W:Math.max(2,state.mezzanineW)}
+    : {L:state.roomL,W:state.roomW};
+}
+function levelTitle(level=state.activeLevel){
+  return level==='mezzanine'?'Мезонин':'1 этаж';
+}
+function entityBounds(o){
+  return levelDims(entityLevel(o)==='both'?state.activeLevel:entityLevel(o));
+}
+function levelArea(level){
+  const d=levelDims(level);
+  return d.L*d.W;
+}
+function fixedEntityLevel(o){
+  if(!o) return null;
+  if(o.name==='Сборка') return 'mezzanine';
+  if(['Хранение','Центральный проход','Приёмка','Отгрузка','Коридор персонала','Раздевалка','Офис','WC','Вход поставщиков','Вход/выход персонала','Эвакуационный выход'].includes(o.name)) return 'ground';
+  if(o.objectKind==='vertical_link') return 'both';
+  return null;
+}
 
 function inferZoneRole(o){
   if(!o) return 'optional';
@@ -86,24 +121,48 @@ function migrateSmartZones(){
 migrateSmartZones();
 
 function migrateV69(){
-  // Сборка в этом проекте находится на мезонине и не должна занимать площадь 1 этажа.
-  state.zones = (state.zones||[]).filter(z=>z.name!=='Сборка');
+  // 7.7: каждому объекту назначается уровень.
+  (state.zones||[]).forEach(z=>{
+    z.level=fixedEntityLevel(z)||z.level||(z.name==='Сборка'?'mezzanine':'ground');
+  });
+  (state.objects||[]).forEach(o=>{
+    o.level=fixedEntityLevel(o)||o.level||'ground';
+  });
+  (state.columns||[]).forEach(c=>{
+    if(!c.level) c.level='ground';
+  });
 
-  // Старая зона "Хранение" больше не является геометрическим источником для стеллажей.
-  // Оставляем её только как системную сущность совместимости, но не рисуем и не блокируем.
+  const storage=(state.zones||[]).find(z=>z.name==='Хранение');
+  if(storage) storage.level='ground';
+
+  const picking=(state.zones||[]).find(z=>z.name==='Сборка');
+  if(picking){
+    picking.level='mezzanine';
+    picking.type='process';
+    picking.zoneRole='process';
+    picking.affectsFlow=true;
+    picking.blocksStorage=true;
+  }else if((state.zones||[]).length){
+    const L=Math.max(2,state.mezzanineL),W=Math.max(2,state.mezzanineW);
+    state.zones.push({
+      name:'Сборка',type:'process',zoneRole:'process',level:'mezzanine',
+      x:.5,y:.5,w:Math.min(6,Math.max(2,L-1)),h:Math.min(3,Math.max(1.5,W-1)),
+      rotation:0,affectsCapacity:false,blocksStorage:true,affectsFlow:true,needsCamera:true
+    });
+  }
 }
 migrateV69();
 
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV76',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerV77',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function getZone(n){return state.zones.find(z=>z.name===n)}
 function area(r){return Math.max(0,r.w*r.h)}
-function colAreaIn(r){return state.columns.reduce((s,c)=>{if(!rectsOverlap(r,c))return s;const x1=Math.max(r.x,c.x),x2=Math.min(r.x+r.w,c.x+c.w),y1=Math.max(r.y,c.y),y2=Math.min(r.y+r.h,c.y+c.h);return s+Math.max(0,x2-x1)*Math.max(0,y2-y1)},0)}
+function colAreaIn(r){return state.columns.reduce((s,c)=>{if(!onLevel(c,entityLevel(r)))return s;if(!rectsOverlap(r,c))return s;const x1=Math.max(r.x,c.x),x2=Math.min(r.x+r.w,c.x+c.w),y1=Math.max(r.y,c.y),y2=Math.min(r.y+r.h,c.y+c.h);return s+Math.max(0,x2-x1)*Math.max(0,y2-y1)},0)}
 function netArea(r){return Math.max(0,area(r)-colAreaIn(r))}
 function selectedArray(){
   if(selected.kind==='zone') return state.zones;
@@ -118,20 +177,26 @@ function objectColor(o){
 function initZones(){
   const L=state.roomL,W=state.roomW;
   state.zones=[
-    {name:'Коридор персонала',type:'service',x:0,y:0,w:2.2,h:W,locked:false},
-    {name:'Раздевалка',type:'staff',x:.2,y:1,w:1.8,h:2,locked:false},
-    {name:'Офис',type:'staff',x:.2,y:3.3,w:1.8,h:2.4,locked:false},
-    {name:'WC',type:'service',x:.2,y:6,w:1.8,h:1.3,locked:false},
-    {name:'Хранение',type:'storage',x:2.4,y:.2,w:L-2.8,h:W-3.2,locked:false},
-    {name:'Центральный проход',type:'service',x:2.4,y:(W-3.2)/2-state.centralAisle/2+.2,w:L-2.8,h:state.centralAisle,locked:false},
-    {name:'Приёмка',type:'process',x:2.4,y:W-2.6,w:5,h:2.2,locked:false},
-    {name:'Отгрузка',type:'process',x:13,y:W-2.6,w:4.2,h:2.2,locked:false},
-    {name:'Вход поставщиков',type:'service',x:L/2-1.5,y:W-.6,w:3,h:.6,locked:false},
-    {name:'Вход/выход персонала',type:'service',x:0,y:W/2-.8,w:.4,h:1.6,locked:false},
-    {name:'Эвакуационный выход',type:'service',x:L-.4,y:W/2-.8,w:.4,h:1.6,locked:false},
+    {name:'Коридор персонала',type:'service',level:'ground',x:0,y:0,w:2.2,h:W,locked:false},
+    {name:'Раздевалка',type:'staff',level:'ground',x:.2,y:1,w:1.8,h:2,locked:false},
+    {name:'Офис',type:'staff',level:'ground',x:.2,y:3.3,w:1.8,h:2.4,locked:false},
+    {name:'WC',type:'service',level:'ground',x:.2,y:6,w:1.8,h:1.3,locked:false},
+    {name:'Хранение',type:'storage',level:'ground',x:2.4,y:.2,w:L-2.8,h:W-3.2,locked:false},
+    {name:'Центральный проход',type:'service',level:'ground',x:2.4,y:(W-3.2)/2-state.centralAisle/2+.2,w:L-2.8,h:state.centralAisle,locked:false},
+    {name:'Приёмка',type:'process',level:'ground',x:2.4,y:W-2.6,w:5,h:2.2,locked:false},
+    {name:'Отгрузка',type:'process',level:'ground',x:13,y:W-2.6,w:4.2,h:2.2,locked:false},
+    {name:'Вход поставщиков',type:'service',level:'ground',x:L/2-1.5,y:W-.6,w:3,h:.6,locked:false},
+    {name:'Вход/выход персонала',type:'service',level:'ground',x:0,y:W/2-.8,w:.4,h:1.6,locked:false},
+    {name:'Эвакуационный выход',type:'service',level:'ground',x:L-.4,y:W/2-.8,w:.4,h:1.6,locked:false},
+    {name:'Сборка',type:'process',zoneRole:'process',level:'mezzanine',
+      x:.5,y:.5,w:Math.min(6,Math.max(2,state.mezzanineL-1)),h:Math.min(3,Math.max(1.5,state.mezzanineW-1)),
+      rotation:0,affectsCapacity:false,blocksStorage:true,affectsFlow:true,needsCamera:true}
   ];
 }
+
 if(!state.zones.length)initZones();
+migrateSmartZones();
+migrateV69();
 
 
 function recommendedCentralAisle(){
@@ -213,12 +278,12 @@ function optimize(){
   const mainW=Math.max(4,L-left-0.4);
   const processY=W-procDepth-0.2;
   const storage={
-    name:'Хранение',type:'storage',
+    name:'Хранение',type:'storage',level:'ground',
     x:left+0.2,y:0.2,w:mainW,h:Math.max(2.4,processY-0.4),
     rotation:0,affectsCapacity:true,affectsFlow:false,needsCamera:true
   };
 
-  // Приёмка/сборка/отгрузка: сборке больше места, т.к. она самое медленное звено.
+  // На 1 этаже размещаем приёмку и отгрузку. Средний промежуток остаётся доступным хранению; сборка находится на мезонине.
   let acceptRatio=0.30,pickRatio=0.42,shipRatio=0.28;
   if(state.layoutMode==='capacity'){acceptRatio=0.29;pickRatio=0.39;shipRatio=0.32;}
   if(state.layoutMode==='flow'){acceptRatio=0.31;pickRatio=0.45;shipRatio=0.24;}
@@ -227,22 +292,27 @@ function optimize(){
   const sw=mainW-aw-pw;
 
   state.zones=[
-    {name:'Коридор персонала',type:'service',x:0,y:0,w:left,h:W,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:true},
-    {name:'Раздевалка',type:'staff',x:0.2,y:0.8,w:left-0.4,h:1.9,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:false},
-    {name:'Офис',type:'staff',x:0.2,y:3.0,w:left-0.4,h:2.2,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:true},
-    {name:'WC',type:'service',x:0.2,y:5.5,w:left-0.4,h:1.2,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:false},
+    {name:'Коридор персонала',type:'service',level:'ground',x:0,y:0,w:left,h:W,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:true},
+    {name:'Раздевалка',type:'staff',level:'ground',x:0.2,y:0.8,w:left-0.4,h:1.9,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:false},
+    {name:'Офис',type:'staff',level:'ground',x:0.2,y:3.0,w:left-0.4,h:2.2,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:true},
+    {name:'WC',type:'service',level:'ground',x:0.2,y:5.5,w:left-0.4,h:1.2,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:false},
     storage,
-    {name:'Центральный проход',type:'service',
+    {name:'Центральный проход',type:'service',level:'ground',
       x:storage.x,y:storage.y+storage.h/2-state.centralAisle/2,
       w:storage.w,h:state.centralAisle,rotation:0,
       affectsCapacity:true,affectsFlow:true,needsCamera:false},
-    {name:'Приёмка',type:'process',x:storage.x,y:processY,w:aw,h:procDepth,rotation:0,affectsCapacity:true,affectsFlow:true,needsCamera:true},
-    {name:'Отгрузка',type:'process',x:storage.x+aw+pw,y:processY,w:sw,h:procDepth,rotation:0,affectsCapacity:true,affectsFlow:true,needsCamera:true},
-    {name:'Вход поставщиков',type:'service',x:L/2-1.2,y:W-0.45,w:2.4,h:0.45,rotation:0,affectsCapacity:false,affectsFlow:true,needsCamera:true},
-    {name:'Вход/выход персонала',type:'service',x:0,y:W/2-0.7,w:0.35,h:1.4,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:true},
-    {name:'Эвакуационный выход',type:'service',x:L-0.35,y:W/2-0.7,w:0.35,h:1.4,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:true}
+    {name:'Приёмка',type:'process',level:'ground',x:storage.x,y:processY,w:aw,h:procDepth,rotation:0,affectsCapacity:true,affectsFlow:true,needsCamera:true},
+    {name:'Отгрузка',type:'process',level:'ground',x:storage.x+aw+pw,y:processY,w:sw,h:procDepth,rotation:0,affectsCapacity:true,affectsFlow:true,needsCamera:true},
+    {name:'Вход поставщиков',type:'service',level:'ground',x:L/2-1.2,y:W-0.45,w:2.4,h:0.45,rotation:0,affectsCapacity:false,affectsFlow:true,needsCamera:true},
+    {name:'Вход/выход персонала',type:'service',level:'ground',x:0,y:W/2-0.7,w:0.35,h:1.4,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:true},
+    {name:'Эвакуационный выход',type:'service',level:'ground',x:L-0.35,y:W/2-0.7,w:0.35,h:1.4,rotation:0,affectsCapacity:false,affectsFlow:false,needsCamera:true},
+    {name:'Сборка',type:'process',level:'mezzanine',zoneRole:'process',
+      x:.5,y:.5,w:Math.min(6,Math.max(2,state.mezzanineL-1)),h:Math.min(3,Math.max(1.5,state.mezzanineW-1)),
+      rotation:0,affectsCapacity:false,blocksStorage:true,affectsFlow:true,needsCamera:true}
   ];
 
+  migrateSmartZones();
+  migrateV69();
   normalizeSystemZones();
   renderAll();
 }
@@ -305,26 +375,26 @@ function splitStorageBlocks(){
 function rackBlockers(){
   const blockers=[];
 
-  // Реальные зоны блокируют хранение только в своей текущей геометрии.
-  // Старую системную зону "Хранение" не используем как ограничитель.
+  // Стеллажи и вместимость в 7.7 рассчитываются только для 1 этажа.
   state.zones.forEach(z=>{
+    if(!onLevel(z,'ground')) return;
     if(z.name==='Хранение') return;
     if(z.blocksStorage===false || z.affectsCapacity===false) return;
-    blockers.push({x:z.x,y:z.y,w:z.w,h:z.h,name:z.name,kind:'zone'});
+    blockers.push({x:z.x,y:z.y,w:z.w,h:z.h,name:z.name,kind:'zone',level:'ground'});
   });
 
-  // Колонны всегда являются жесткими препятствиями.
   state.columns.forEach((c,i)=>{
-    blockers.push({x:c.x,y:c.y,w:c.w,h:c.h,name:'Колонна '+(i+1),kind:'column'});
+    if(!onLevel(c,'ground')) return;
+    blockers.push({x:c.x,y:c.y,w:c.w,h:c.h,name:'Колонна '+(i+1),kind:'column',level:'ground'});
   });
 
-  // Пользовательские объекты блокируют только если включено влияние на вместимость.
   state.objects.forEach((o,i)=>{
+    if(!onLevel(o,'ground')) return;
     if(o.blocksStorage===false || o.affectsCapacity===false) return;
     blockers.push({
       x:o.x,y:o.y,w:o.w,h:o.h,
       name:o.name||('Объект '+(i+1)),
-      kind:'object'
+      kind:'object',level:'ground'
     });
   });
 
@@ -501,7 +571,7 @@ function storageCameras(){
       {x:r.x+r.w/2,y:Math.min(state.roomW-.05,r.y+r.h+state.aisle/2)}
     ];
     pts.forEach(p=>{
-      if(!state.columns.some(c=>pointInRect(p,c))) samples.push(p);
+      if(!state.columns.some(c=>onLevel(c,'ground')&&pointInRect(p,c))) samples.push(p);
     });
   });
 
@@ -520,13 +590,13 @@ function storageCameras(){
       {x:r.x+r.w/2,y:Math.max(.15,r.y-state.aisle*.45)},
       {x:r.x+r.w/2,y:Math.min(state.roomW-.15,r.y+r.h+state.aisle*.45)}
     ].forEach(p=>{
-      if(!state.columns.some(c=>pointInRect(p,c))) candidates.push(p);
+      if(!state.columns.some(c=>onLevel(c,'ground')&&pointInRect(p,c))) candidates.push(p);
     });
   });
 
   const visible=(cam,p)=>{
     if(Math.hypot(cam.x-p.x,cam.y-p.y)>range) return false;
-    if(state.columns.some(c=>lineHitsRect(cam,p,c))) return false;
+    if(state.columns.some(c=>onLevel(c,'ground')&&lineHitsRect(cam,p,c))) return false;
     return true;
   };
 
@@ -589,12 +659,35 @@ function analytics(){
   const other=7+userCams;
   const currentFOT=state.opsPerShift*state.shiftsPerDay*state.paidHours*30*state.opRate + state.seniors*state.seniorSalary + state.managers*state.managerSalary;
   const autoFOT=pm.rec*state.shiftsPerDay*state.paidHours*30*state.opRate + state.seniors*state.seniorSalary + state.managers*state.managerSalary;
-  const storage=getZone('Хранение');
-  const processArea=state.zones.filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)+state.objects.filter(o=>o.type==='process').reduce((s,o)=>s+area(o),0);
-  const supportArea=state.zones.filter(z=>z.type!=='process'&&z.type!=='storage').reduce((s,z)=>s+netArea(z),0)+state.objects.filter(o=>o.type!=='process'&&o.type!=='storage').reduce((s,o)=>s+area(o),0);
-  return {rp,vol,cap100,cap,pm,cams,totalCams:cams.cams.length+other,area:state.roomL*state.roomW,storageArea:estimatedRackableArea(),processArea,supportArea,currentFOT,autoFOT,currentOpex:currentFOT+state.rent,autoOpex:autoFOT+state.rent,userCams,streetCount:rp.streetCount||0,rackFootprint:rp.rackArea||0,rackUsedArea:rackUsedArea(),unusedRackableArea:unusedRackableArea()};
-}
 
+  const zonesByLevel=level=>(state.zones||[]).filter(z=>z.name!=='Хранение'&&onLevel(z,level));
+  const objectsByLevel=level=>(state.objects||[]).filter(o=>onLevel(o,level));
+
+  const gp=zonesByLevel('ground').filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)
+    +objectsByLevel('ground').filter(o=>o.type==='process').reduce((s,o)=>s+area(o),0);
+  const gs=zonesByLevel('ground').filter(z=>z.type!=='process'&&z.type!=='storage').reduce((s,z)=>s+netArea(z),0)
+    +objectsByLevel('ground').filter(o=>o.type!=='process'&&o.type!=='storage').reduce((s,o)=>s+area(o),0);
+
+  const mp=zonesByLevel('mezzanine').filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)
+    +objectsByLevel('mezzanine').filter(o=>o.type==='process').reduce((s,o)=>s+area(o),0);
+  const ms=zonesByLevel('mezzanine').filter(z=>z.type!=='process'&&z.type!=='storage').reduce((s,z)=>s+netArea(z),0)
+    +objectsByLevel('mezzanine').filter(o=>o.type!=='process'&&o.type!=='storage').reduce((s,o)=>s+area(o),0);
+
+  const groundArea=state.roomL*state.roomW;
+  const mezzanineArea=state.mezzanineL*state.mezzanineW;
+
+  return {
+    rp,vol,cap100,cap,pm,cams,totalCams:cams.cams.length+other,
+    area:groundArea,groundArea,mezzanineArea,totalOperationalArea:groundArea+mezzanineArea,
+    storageArea:estimatedRackableArea(),
+    processArea:gp,supportArea:gs,
+    groundProcessArea:gp,groundSupportArea:gs,
+    mezzanineProcessArea:mp,mezzanineSupportArea:ms,
+    currentFOT,autoFOT,currentOpex:currentFOT+state.rent,autoOpex:autoFOT+state.rent,
+    userCams,streetCount:rp.streetCount||0,rackFootprint:rp.rackArea||0,
+    rackUsedArea:rackUsedArea(),unusedRackableArea:unusedRackableArea()
+  };
+}
 
 function clientToModel(e,svg,ox,oy,sc){
   const r=svg.getBoundingClientRect();
@@ -608,29 +701,29 @@ function clientToModel(e,svg,ox,oy,sc){
 
 function findEntityAtPoint(pt){
   for(let i=(state.objects||[]).length-1;i>=0;i--){
-    if(pointInRect(pt,state.objects[i])) return {kind:'object',index:i};
+    if(onLevel(state.objects[i])&&pointInRect(pt,state.objects[i])) return {kind:'object',index:i};
   }
   for(let i=(state.columns||[]).length-1;i>=0;i--){
-    if(pointInRect(pt,state.columns[i])) return {kind:'column',index:i};
+    if(onLevel(state.columns[i])&&pointInRect(pt,state.columns[i])) return {kind:'column',index:i};
   }
 
   const candidates=(state.zones||[])
     .map((z,index)=>({z,index,a:area(z)}))
-    .filter(x=>x.z.name!=='Хранение' && pointInRect(pt,x.z))
+    .filter(x=>x.z.name!=='Хранение' && onLevel(x.z) && pointInRect(pt,x.z))
     .sort((a,b)=>a.a-b.a);
 
   return candidates.length ? {kind:'zone',index:candidates[0].index} : null;
 }
-
 function draw(){
   const svg=$('plan');
   svg.innerHTML='';
 
   const ns='http://www.w3.org/2000/svg';
   const W=940,H=520;
-  const sc=Math.min(W/state.roomL,H/state.roomW);
-  const ox=(1000-state.roomL*sc)/2;
-  const oy=(590-state.roomW*sc)/2;
+  const dims=levelDims();
+  const sc=Math.min(W/dims.L,H/dims.W);
+  const ox=(1000-dims.L*sc)/2;
+  const oy=(590-dims.W*sc)/2;
 
   const add=(tag,attrs,parent=svg)=>{
     const e=document.createElementNS(ns,tag);
@@ -639,74 +732,66 @@ function draw(){
     return e;
   };
 
-  add('rect',{x:ox,y:oy,width:state.roomL*sc,height:state.roomW*sc,class:'room'});
+  add('rect',{x:ox,y:oy,width:dims.L*sc,height:dims.W*sc,class:state.activeLevel==='mezzanine'?'room mezzanineRoom':'room'});
 
-  // Сетка помещения: только визуальный слой.
-  for(let i=1;i<state.roomL;i++) add('line',{x1:ox+i*sc,y1:oy,x2:ox+i*sc,y2:oy+state.roomW*sc,class:'grid'});
-  for(let i=1;i<state.roomW;i++) add('line',{x1:ox,y1:oy+i*sc,x2:ox+state.roomL*sc,y2:oy+i*sc,class:'grid'});
+  for(let i=1;i<dims.L;i++) add('line',{x1:ox+i*sc,y1:oy,x2:ox+i*sc,y2:oy+dims.W*sc,class:'grid'});
+  for(let i=1;i<dims.W;i++) add('line',{x1:ox,y1:oy+i*sc,x2:ox+dims.L*sc,y2:oy+i*sc,class:'grid'});
 
-  const actualRackPlan=rackPlan();
-  const candidateArea=rackCandidateArea();
-  const blockers=rackBlockers();
+  const a=analytics();
 
-  // Единый фон потенциальной складской площади.
-  add('rect',{
-    x:ox+candidateArea.x*sc,
-    y:oy+candidateArea.y*sc,
-    width:candidateArea.w*sc,
-    height:candidateArea.h*sc,
-    class:'rackableBg'
-  });
+  if(state.activeLevel==='ground'){
+    const actualRackPlan=a.rp;
+    const candidateArea=rackCandidateArea();
+    const blockers=rackBlockers();
 
-  // Блокирующие зоны "вырезаем" из складского фона визуально.
-  blockers.forEach(b=>{
     add('rect',{
-      x:ox+b.x*sc,
-      y:oy+b.y*sc,
-      width:b.w*sc,
-      height:b.h*sc,
-      class:'blockerCut'
+      x:ox+candidateArea.x*sc,y:oy+candidateArea.y*sc,
+      width:candidateArea.w*sc,height:candidateArea.h*sc,class:'rackableBg'
     });
-  });
 
-  // Фактические стеллажи.
-  (actualRackPlan.racks||[]).forEach(r=>{
-    add('rect',{
-      x:ox+r.x*sc+1,
-      y:oy+r.y*sc+1,
-      width:Math.max(2,r.w*sc-2),
-      height:Math.max(2,r.h*sc-2),
-      class:'rack'
-    });
-  });
-
-  // Optimizer 7.5: зелёный preview дополнительных секций.
-  (optimizerPreviewRacks||[]).forEach(r=>{
-    add('rect',{
-      x:ox+r.x*sc+2,
-      y:oy+r.y*sc+2,
-      width:Math.max(2,r.w*sc-4),
-      height:Math.max(2,r.h*sc-4),
-      class:'rackPreview'
-    });
-  });
-
-  // Validation Engine 7.6: проблемные участки улиц и буферы выходов.
-  if($('showValidationOverlay')?.checked && validationIsCurrent()){
-    (validationOverlayRects||[]).forEach(v=>{
+    blockers.forEach(b=>{
       add('rect',{
-        x:ox+v.x*sc,
-        y:oy+v.y*sc,
-        width:Math.max(2,v.w*sc),
-        height:Math.max(2,v.h*sc),
-        class:v.severity==='bad'?'validationIssueBad':'validationIssueWarn'
+        x:ox+b.x*sc,y:oy+b.y*sc,width:b.w*sc,height:b.h*sc,class:'blockerCut'
       });
     });
+
+    (actualRackPlan.racks||[]).forEach(r=>{
+      add('rect',{
+        x:ox+r.x*sc+1,y:oy+r.y*sc+1,
+        width:Math.max(2,r.w*sc-2),height:Math.max(2,r.h*sc-2),class:'rack'
+      });
+    });
+
+    (optimizerPreviewRacks||[]).forEach(r=>{
+      add('rect',{
+        x:ox+r.x*sc+2,y:oy+r.y*sc+2,
+        width:Math.max(2,r.w*sc-4),height:Math.max(2,r.h*sc-4),class:'rackPreview'
+      });
+    });
+
+    if($('showValidationOverlay')?.checked && validationIsCurrent()){
+      (validationOverlayRects||[]).filter(v=>['ground','both'].includes(v.level||'ground')).forEach(v=>{
+        add('rect',{
+          x:ox+v.x*sc,y:oy+v.y*sc,width:Math.max(2,v.w*sc),height:Math.max(2,v.h*sc),
+          class:v.severity==='bad'?'validationIssueBad':'validationIssueWarn'
+        });
+      });
+    }
+  }else{
+    add('text',{x:ox+12,y:oy+22,class:'levelCanvasTitle'}).textContent='Мезонин · процессный уровень';
+    if($('showValidationOverlay')?.checked && validationIsCurrent()){
+      (validationOverlayRects||[]).filter(v=>['mezzanine','both'].includes(v.level)).forEach(v=>{
+        add('rect',{
+          x:ox+v.x*sc,y:oy+v.y*sc,width:Math.max(2,v.w*sc),height:Math.max(2,v.h*sc),
+          class:v.severity==='bad'?'validationIssueBad':'validationIssueWarn'
+        });
+      });
+    }
   }
 
-  // Теперь рисуем реальные интерактивные зоны поверх складской геометрии.
   state.zones.forEach((z,idx)=>{
-    if(z.name==='Хранение') return; // legacy zone больше не рисуем
+    if(z.name==='Хранение') return;
+    if(!onLevel(z)) return;
 
     const g=add('g',{'data-kind':'zone','data-index':idx,class:'obj'});
     add('rect',{
@@ -715,13 +800,14 @@ function draw(){
       class:'zone'+(selected.kind==='zone'&&selected.index===idx?' selected':'')
     },g);
     add('text',{x:ox+z.x*sc+7,y:oy+z.y*sc+18,class:'label'},g).textContent=z.name;
-    add('text',{x:ox+z.x*sc+7,y:oy+z.y*sc+33,class:'sub'},g).textContent=fmt1(netArea(z))+' м²';
+    add('text',{x:ox+z.x*sc+7,y:oy+z.y*sc+33,class:'sub'},g).textContent=fmt1(netArea(z))+' м² · '+levelTitle(entityLevel(z)==='both'?state.activeLevel:entityLevel(z));
     if(mode==='resize'&&selected.kind==='zone'&&selected.index===idx){
       add('rect',{x:ox+(z.x+z.w)*sc-8,y:oy+(z.y+z.h)*sc-8,width:16,height:16,class:'handle'},g);
     }
   });
 
   state.objects.forEach((o,idx)=>{
+    if(!onLevel(o)) return;
     const g=add('g',{'data-kind':'object','data-index':idx,class:'obj'});
     add('rect',{
       x:ox+o.x*sc,y:oy+o.y*sc,width:o.w*sc,height:o.h*sc,rx:6,
@@ -736,6 +822,7 @@ function draw(){
   });
 
   state.columns.forEach((c,idx)=>{
+    if(!onLevel(c)) return;
     const g=add('g',{'data-kind':'column','data-index':idx,class:'obj'});
     add('rect',{
       x:ox+c.x*sc,y:oy+c.y*sc,width:c.w*sc,height:c.h*sc,rx:4,
@@ -746,15 +833,15 @@ function draw(){
     }
   });
 
-  // Камеры строятся по фактическим стеллажам.
-  const a=analytics();
-  a.cams.cams.forEach(p=>{
-    add('circle',{cx:ox+p.x*sc,cy:oy+p.y*sc,r:4,class:'cam'});
-    add('path',{d:`M ${ox+p.x*sc-10} ${oy+p.y*sc+8} Q ${ox+p.x*sc} ${oy+p.y*sc-6} ${ox+p.x*sc+10} ${oy+p.y*sc+8}`,class:'camarc'});
-  });
-  a.cams.uncovered.slice(0,150).forEach(p=>{
-    add('circle',{cx:ox+p.x*sc,cy:oy+p.y*sc,r:2,class:'dead'});
-  });
+  if(state.activeLevel==='ground'){
+    a.cams.cams.forEach(p=>{
+      add('circle',{cx:ox+p.x*sc,cy:oy+p.y*sc,r:4,class:'cam'});
+      add('path',{d:`M ${ox+p.x*sc-10} ${oy+p.y*sc+8} Q ${ox+p.x*sc} ${oy+p.y*sc-6} ${ox+p.x*sc+10} ${oy+p.y*sc+8}`,class:'camarc'});
+    });
+    a.cams.uncovered.slice(0,150).forEach(p=>{
+      add('circle',{cx:ox+p.x*sc,cy:oy+p.y*sc,r:2,class:'dead'});
+    });
+  }
 
   svg.onmousedown=e=>{
     const pt=clientToModel(e,svg,ox,oy,sc);
@@ -772,18 +859,15 @@ function draw(){
     selected={kind,index};
     const arr=kind==='zone'?state.zones:kind==='column'?state.columns:state.objects;
     const target=arr[index];
-    if(!target)return;
+    if(!target||!onLevel(target))return;
 
     const nearHandle=mode==='resize' &&
       Math.abs(pt.x-(target.x+target.w))<.35 &&
       Math.abs(pt.y-(target.y+target.h))<.35;
 
     drag={
-      kind,index,
-      startX:pt.x,startY:pt.y,
-      orig:{...target},
-      action:nearHandle?'resize':'move',
-      ox,oy,sc
+      kind,index,startX:pt.x,startY:pt.y,
+      orig:{...target},action:nearHandle?'resize':'move',ox,oy,sc
     };
 
     renderSelected();
@@ -795,9 +879,11 @@ function draw(){
     const svg=$('plan');
     const pt=clientToModel(e,svg,drag.ox,drag.oy,drag.sc);
     const target=drag.kind==='zone'?state.zones[drag.index]:drag.kind==='column'?state.columns[drag.index]:state.objects[drag.index];
+    if(!target)return;
+    const bd=levelDims(entityLevel(target)==='both'?state.activeLevel:entityLevel(target));
 
     if(drag.action==='move'){
-      if(target.name==='Центральный проход'){
+      if(target.name==='Центральный проход'&&onLevel(target,'ground')){
         const candidate=rackCandidateArea();
         if(centralIsVertical()){
           target.y=candidate.y;
@@ -809,11 +895,11 @@ function draw(){
           target.y=clamp(drag.orig.y+(pt.y-drag.startY),candidate.y+.3,candidate.y+candidate.h-target.h-.3);
         }
       }else{
-        target.x=clamp(drag.orig.x+(pt.x-drag.startX),0,state.roomL-target.w);
-        target.y=clamp(drag.orig.y+(pt.y-drag.startY),0,state.roomW-target.h);
+        target.x=clamp(drag.orig.x+(pt.x-drag.startX),0,Math.max(0,bd.L-target.w));
+        target.y=clamp(drag.orig.y+(pt.y-drag.startY),0,Math.max(0,bd.W-target.h));
       }
     }else{
-      if(target.name==='Центральный проход'){
+      if(target.name==='Центральный проход'&&onLevel(target,'ground')){
         if(centralIsVertical()){
           target.w=clamp(drag.orig.w+(pt.x-drag.startX),1.2,2.6);
           state.centralAisle=target.w;
@@ -822,33 +908,43 @@ function draw(){
           state.centralAisle=target.h;
         }
       }else{
-        target.w=clamp(drag.orig.w+(pt.x-drag.startX),.3,state.roomL-target.x);
-        target.h=clamp(drag.orig.h+(pt.y-drag.startY),.3,state.roomW-target.y);
+        target.w=clamp(drag.orig.w+(pt.x-drag.startX),.3,Math.max(.3,bd.L-target.x));
+        target.h=clamp(drag.orig.h+(pt.y-drag.startY),.3,Math.max(.3,bd.W-target.y));
       }
     }
 
-    save();
-    draw();
-    renderTabs();
-    renderSelected();
+    save();draw();renderTabs();renderSelected();
   };
 
   window.onmouseup=()=>{
-    if(drag){
-      drag=null;
-      renderAll();
-    }
+    if(drag){drag=null;renderAll();}
   };
 
-  $('layoutSummary').textContent=`Свободная геометрия · улиц ${a.rp.streetCount||0} · секций ${a.rp.total} · стеллажи ${fmt1(a.rp.rackArea||0)} м² · свободный остаток ${fmt1(unusedRackableArea())} м² · ${a.rp.orientation==='horizontal'?'продольные':'поперечные'} улицы`;
+  if(state.activeLevel==='ground'){
+    $('layoutSummary').textContent=`1 этаж · ${fmt1(a.groundArea)} м² · улиц ${a.rp.streetCount||0} · секций ${a.rp.total} · стеллажи ${fmt1(a.rp.rackArea||0)} м² · свободный остаток ${fmt1(unusedRackableArea())} м²`;
+  }else{
+    const zones=(state.zones||[]).filter(z=>z.name!=='Хранение'&&onLevel(z,'mezzanine'));
+    const process=zones.filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)
+      +(state.objects||[]).filter(o=>onLevel(o,'mezzanine')&&o.type==='process').reduce((s,o)=>s+area(o),0);
+    $('layoutSummary').textContent=`Мезонин · ${fmt1(a.mezzanineArea)} м² · процессные зоны ${fmt1(process)} м² · не уменьшает вместимость стеллажей 1 этажа`;
+  }
 }
 function renderSelected(){
   const box=$('selectedEditor');
   if(!selected.kind){box.innerHTML='<div class="hint">Кликни по зоне, проходу, колонне или добавленному объекту.</div>';return}
   const arr=selectedArray(),obj=arr[selected.index];
   if(!obj){selected={kind:null,index:null};return renderSelected()}
+  const lvl=entityLevel(obj);
+
   box.innerHTML=`<div class="selname">${selected.kind==='column'?'Колонна '+(selected.index+1):obj.name}</div>
   ${selected.kind!=='column'?`<label>Название<input id="selName" value="${obj.name}"></label>`:''}
+  <label>Уровень
+    <select id="selLevel">
+      <option value="ground">1 этаж</option>
+      <option value="mezzanine">Мезонин</option>
+      <option value="both">Оба уровня</option>
+    </select>
+  </label>
   <div class="grid2">
     <label>X<input id="sx" type="number" step="0.1" value="${obj.x.toFixed(1)}"></label>
     <label>Y<input id="sy" type="number" step="0.1" value="${obj.y.toFixed(1)}"></label>
@@ -862,11 +958,28 @@ function renderSelected(){
     <label><input id="capToggle" type="checkbox" ${obj.affectsCapacity?'checked':''}> влияет на аналитику вместимости</label>
     <label><input id="flowToggle" type="checkbox" ${obj.affectsFlow?'checked':''}> влияет на поток</label>
     <label><input id="camToggle" type="checkbox" ${obj.needsCamera?'checked':''}> нужен контроль камерой</label>
-  </div><div class="hint">Поворот: ${obj.rotation||0}°. Если снять «занимает площадь для стеллажей», оптимизатор сможет использовать эту область под хранение.</div>`:''}`;
+  </div><div class="hint">Уровень: ${lvl==='both'?'оба уровня':levelTitle(lvl)}. Объекты мезонина не блокируют стеллажи 1 этажа.</div>`:''}`;
+
+  if($('selLevel')){
+    const fixed=fixedEntityLevel(obj);
+    $('selLevel').value=fixed||lvl;
+    $('selLevel').disabled=!!fixed;
+    $('selLevel').onchange=()=>{
+      if(fixed)return;
+      obj.level=$('selLevel').value;
+      const bd=levelDims(obj.level==='both'?state.activeLevel:obj.level);
+      obj.x=clamp(obj.x,0,Math.max(0,bd.L-obj.w));
+      obj.y=clamp(obj.y,0,Math.max(0,bd.W-obj.h));
+      selected={kind:null,index:null};
+      if(obj.level!=='both')state.activeLevel=obj.level;
+      renderAll();
+    };
+  }
   if($('selName'))$('selName').oninput=()=>{obj.name=$('selName').value;renderAll()};
   ['sx','sy','sw','sh'].forEach(id=>$(id).oninput=()=>{
     obj[{sx:'x',sy:'y',sw:'w',sh:'h'}[id]]=parseFloat($(id).value)||0;
-    if(obj.name==='Центральный проход')state.centralAisle=centralIsVertical()?obj.w:obj.h;renderAll();
+    if(obj.name==='Центральный проход')state.centralAisle=centralIsVertical()?obj.w:obj.h;
+    renderAll();
   });
   if($('selType')){$('selType').value=obj.type;$('selType').onchange=()=>{obj.type=$('selType').value;renderAll()}}
   if($('zoneRole')){$('zoneRole').value=obj.zoneRole||inferZoneRole(obj);$('zoneRole').onchange=()=>{obj.zoneRole=$('zoneRole').value;renderAll()}}
@@ -875,35 +988,50 @@ function renderSelected(){
   if($('flowToggle'))$('flowToggle').onchange=()=>{obj.affectsFlow=$('flowToggle').checked;renderAll()};
   if($('camToggle'))$('camToggle').onchange=()=>{obj.needsCamera=$('camToggle').checked;renderAll()};
 }
-
 function renderColumns(){
   const w=$('columnsList');w.innerHTML='';
-  state.columns.forEach((c,i)=>{
-    const d=document.createElement('div');d.className='colitem';d.innerHTML=`<div class="headrow"><b>Колонна ${i+1}</b><button class="delbtn">×</button></div><div class="hint">${fmt1(c.x)} × ${fmt1(c.y)} · ${fmt1(c.w)}×${fmt1(c.h)} м</div>`;
+  const visible=state.columns.map((c,i)=>({c,i})).filter(x=>onLevel(x.c));
+  if(!visible.length){
+    w.innerHTML='<div class="hint">На активном уровне колонн нет.</div>';
+    return;
+  }
+  visible.forEach(({c,i})=>{
+    const d=document.createElement('div');
+    d.className='colitem';
+    d.innerHTML=`<div class="headrow"><b>Колонна ${i+1}</b><button class="delbtn">×</button></div><div class="hint">${fmt1(c.x)} × ${fmt1(c.y)} · ${fmt1(c.w)}×${fmt1(c.h)} м · ${entityLevel(c)==='both'?'оба уровня':levelTitle(entityLevel(c))}</div>`;
     d.querySelector('.delbtn').onclick=()=>{state.columns.splice(i,1);if(selected.kind==='column'&&selected.index===i)selected={kind:null};renderAll()};
     d.onclick=e=>{if(e.target.tagName!=='BUTTON'){selected={kind:'column',index:i};renderSelected();draw()}};
     w.appendChild(d)
   })
 }
-
 function renderEmu(){
   const m=processModel(state.simFlow),ok=m.util<=1,total=m.total||1;
+  const pickLevel=((state.zones||[]).find(z=>z.name==='Сборка')?.level)==='mezzanine'?'мезонин':'1 этаж';
   $('emulatorBody').innerHTML=`<div class="emugrid">
   <div class="emukpi ${ok?'goodbg':'badbg'}"><span>Статус</span><b>${ok?'Поток проходит':'Выше мощности'}</b><small>${fmt(state.simFlow)} ШК/мес</small></div>
   <div class="emukpi"><span>Загрузка</span><b>${fmt1(m.util*100)}%</b></div>
   <div class="emukpi"><span>Минимум</span><b>${m.min} оп./смену</b></div>
   <div class="emukpi"><span>Рекомендуемо</span><b>${m.rec} оп./смену</b></div></div>
-  <div class="lineflow"><span>Приёмка</span><i>→</i><span>Раскладка</span><i>→</i><span>Сборка</span><i>→</i><span>Отгрузка</span></div>`
+  <div class="lineflow levelFlow"><span>Приёмка<small>1 этаж</small></span><i>→</i><span>Раскладка<small>1 этаж</small></span><i>⇅</i><span>Сборка<small>${pickLevel}</small></span><i>⇅</i><span>Отгрузка<small>1 этаж</small></span></div>`
 }
-
 function tr(a,b,c,d){return `<tr><td>${a}</td><td>${b}</td>${c!==undefined?`<td>${c}</td>`:''}${d!==undefined?`<td>${d}</td>`:''}</tr>`}
 function metric(name,val,sub=''){return `<div class="metricrow"><span>${name}</span><b>${val}</b>${sub?`<small>${sub}</small>`:''}</div>`}
 function renderTabs(){
   const a=analytics(),pm=a.pm;
-  $('mArea').textContent=fmt1(a.area)+' м²';$('mCapacity').textContent=fmt(a.cap)+' ШК';$('mThroughput').textContent=fmt(pm.maxMonthly)+' ШК/мес';$('mCams').textContent=fmt(a.totalCams)+' шт.';$('mStaff').textContent=pm.rec+' оп./смену';
+  $('mArea').textContent=fmt1(a.groundArea)+' м²';
+  if($('mMezzArea'))$('mMezzArea').textContent=fmt1(a.mezzanineArea)+' м²';
+  $('mCapacity').textContent=fmt(a.cap)+' ШК';
+  $('mThroughput').textContent=fmt(pm.maxMonthly)+' ШК/мес';
+  $('mCams').textContent=fmt(a.totalCams)+' шт.';
+  $('mStaff').textContent=pm.rec+' оп./смену';
 
-  $('tab-capacity').innerHTML=`<div class="cards3">${metric('Площадь хранения',fmt1(a.storageArea)+' м²')}${metric('Секции',fmt(a.rp.total))}${metric('Рабочая вместимость',fmt(a.cap)+' ШК',state.fillPct+'% заполнения')}</div>
-  <table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr>${tr('Полезный объём',fmt1(a.vol)+' м³')}${tr('Вместимость 100%',fmt(a.cap100)+' ШК')}${tr('Рабочая вместимость',fmt(a.cap)+' ШК')}${tr('Центральный проход',fmt1(state.centralAisle)+' м · '+(centralIsVertical()?'вертикальный':'горизонтальный')+' · '+fmt1(area(getZone('Центральный проход')||{w:0,h:0}))+' м²')}</table>`;
+  const central=getZone('Центральный проход');
+  const centralText=central&&onLevel(central,'ground')
+    ? `${fmt1(state.centralAisle)} м · ${centralIsVertical()?'вертикальный':'горизонтальный'} · ${fmt1(area(central))} м²`
+    : 'нет';
+
+  $('tab-capacity').innerHTML=`<div class="cards3">${metric('Площадь хранения 1 этажа',fmt1(a.storageArea)+' м²')}${metric('Секции',fmt(a.rp.total))}${metric('Рабочая вместимость',fmt(a.cap)+' ШК',state.fillPct+'% заполнения')}</div>
+  <table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr>${tr('Полезный объём',fmt1(a.vol)+' м³')}${tr('Вместимость 100%',fmt(a.cap100)+' ШК')}${tr('Рабочая вместимость',fmt(a.cap)+' ШК')}${tr('Центральный проход',centralText)}${tr('Мезонин','не уменьшает расчёт стеллажной вместимости 1 этажа')}</table>`;
 
   const oneTurn=processModel(a.cap),avg=processModel(state.avgFlow||100000),mx=processModel(state.maxFlow||120000);
   $('tab-throughput').innerHTML=`<div class="cards3">${metric('1 оборот рабочего стока',fmt(a.cap)+' ШК/мес',fmt(a.cap/30)+' ШК/сутки')}${metric('Средний рабочий',fmt(state.avgFlow||100000)+' ШК/мес',fmt1(avg.util*100)+'% загрузки')}${metric('Максимальный',fmt(state.maxFlow||120000)+' ШК/мес',fmt1(mx.util*100)+'% загрузки')}</div>
@@ -913,21 +1041,72 @@ function renderTabs(){
   <table class="tbl"><tr><th>Операция</th><th>Норма</th><th>Чел.-смен/сутки</th><th>Доля труда</th></tr>${Object.keys(pm.req).map(k=>tr(names[k],fmt(pm.norms[k]),fmt1(pm.req[k]),fmt1(pm.req[k]/pm.total*100)+'%')).join('')}</table>`;
 
   $('tab-video').innerHTML=`<div class="cards3">${metric('Автокамеры склада',a.cams.cams.length)}${metric('Мёртвые точки',a.cams.uncovered.length,a.cams.uncovered.length?'нужно корректировать':'не обнаружены')}${metric('Итого камер',a.totalCams)}</div>
-  <table class="tbl"><tr><th>Блок</th><th>Количество</th><th>Комментарий</th></tr>${tr('Склад',a.cams.cams.length,'автопокрытие')}${tr('Пользовательские камеры',a.userCams,'добавлены вручную')}${tr('Прочие точки',7,'входы, коридор, офис, отгрузка')}</table>`;
+  <table class="tbl"><tr><th>Блок</th><th>Количество</th><th>Комментарий</th></tr>${tr('Склад 1 этажа',a.cams.cams.length,'автопокрытие')}${tr('Пользовательские камеры',a.userCams,'все уровни')}${tr('Прочие точки',7,'базовые точки модели')}</table>`;
 
   $('tab-equip').innerHTML=`<div class="cards3">${metric('Пользовательские объекты',state.objects.length)}${metric('Колонны',state.columns.length)}${metric('Оборудование',state.objects.filter(o=>o.type==='equipment').length)}</div>
-  <table class="tbl"><tr><th>Объект</th><th>Количество</th><th>Комментарий</th></tr>${tr('Стационарные ПК',state.fixedPC||2,'базовая модель')}${tr('ТСД',state.fixedTsd||3,'базовая модель')}${tr('Планшеты',state.fixedTablet||2,'базовая модель')}${tr('Столы, двери, кастомные зоны',state.objects.length,'созданы через библиотеку')}</table>`;
+  <table class="tbl"><tr><th>Объект</th><th>Количество</th><th>Комментарий</th></tr>${tr('Стационарные ПК',state.fixedPC||2,'базовая модель')}${tr('ТСД',state.fixedTsd||3,'базовая модель')}${tr('Планшеты',state.fixedTablet||2,'базовая модель')}${tr('Столы, двери, кастомные зоны',state.objects.length,'могут быть назначены на любой уровень')}</table>`;
 
-  const route='Сборка на мезонине';
+  const picking=(state.zones||[]).find(z=>z.name==='Сборка');
+  const verticalLinks=(state.objects||[]).filter(o=>o.objectKind==='vertical_link');
+  if($('tab-levels')){
+    $('tab-levels').innerHTML=`<div class="cards3">
+      ${metric('1 этаж',fmt1(a.groundArea)+' м²',fmt1(a.groundProcessArea)+' м² процессов')}
+      ${metric('Мезонин',fmt1(a.mezzanineArea)+' м²',fmt1(a.mezzanineProcessArea)+' м² процессов')}
+      ${metric('Вертикальные связи',verticalLinks.length,verticalLinks.length?'лестница / подъёмник':'добавь через библиотеку')}
+    </div>
+    <table class="tbl"><tr><th>Этап</th><th>Уровень</th><th>Комментарий</th></tr>
+      ${tr('Приёмка','1 этаж','участвует в площади 1 этажа')}
+      ${tr('Раскладка','1 этаж','проходит в стеллажных улицах')}
+      ${tr('Сборка',picking?levelTitle(entityLevel(picking)):'не задана',picking?fmt1(area(picking))+' м²':'добавь зону')}
+      ${tr('Отгрузка','1 этаж','участвует в площади 1 этажа')}
+      ${tr('Сквозной поток','оба уровня','расчёт производительности сохраняет все четыре этапа')}
+    </table>`;
+  }
+
   $('tab-analytics').innerHTML=`<div class="cards3">${metric('ФОТ текущий',money(a.currentFOT))}${metric('ФОТ с автоштатом',money(a.autoFOT))}${metric('OPEX с арендой',money(a.currentOpex))}</div>
-  <table class="tbl"><tr><th>Аналитика</th><th>Значение</th></tr>${tr('Доля площади, занятой стеллажами',fmt1(a.rackUsedArea/a.area*100)+'%')}
-    ${tr('Неиспользуемая доступная площадь',fmt1(a.unusedRackableArea)+' м²')}${tr('Доля процессных зон',fmt1(a.processArea/a.area*100)+'%')}${tr('Доля staff/service',fmt1(a.supportArea/a.area*100)+'%')}${tr('Секций на 1 м²',fmt1(a.rp.total/a.area))}
-    ${tr('Алгоритм размещения стеллажей','автозаполнение всей свободной рабочей площади')}${tr('ШК на 1 м²',fmt1(a.cap/a.area))}${tr('Сборка',route+' · площадь 1 этажа не занимает')}${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' ШК/мес')}${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' ШК/мес')}${tr('CAPEX',money(state.capex||2921881))}${tr('Аренда',money(state.rent||300000))}</table>`;
+  <table class="tbl"><tr><th>Аналитика</th><th>Значение</th></tr>
+    ${tr('Площадь 1 этажа',fmt1(a.groundArea)+' м²')}
+    ${tr('Площадь мезонина',fmt1(a.mezzanineArea)+' м²')}
+    ${tr('Суммарная моделируемая площадь уровней',fmt1(a.totalOperationalArea)+' м²')}
+    ${tr('Доля 1 этажа, занятая стеллажами',fmt1(a.rackUsedArea/a.groundArea*100)+'%')}
+    ${tr('Неиспользуемая доступная площадь 1 этажа',fmt1(a.unusedRackableArea)+' м²')}
+    ${tr('Процессные зоны 1 этажа',fmt1(a.groundProcessArea)+' м²')}
+    ${tr('Процессные зоны мезонина',fmt1(a.mezzanineProcessArea)+' м²')}
+    ${tr('Секций на 1 м² первого этажа',fmt1(a.rp.total/a.groundArea))}
+    ${tr('ШК на 1 м² первого этажа',fmt1(a.cap/a.groundArea))}
+    ${tr('Сборка',picking&&entityLevel(picking)==='mezzanine'?'мезонин · площадь 1 этажа не занимает':'проверь уровень')}
+    ${tr('Макс. сквозной поток',fmt(pm.maxMonthly)+' ШК/мес')}
+    ${tr('Запас мощности до таргета',fmt(pm.maxMonthly-state.targetFlow)+' ШК/мес')}
+    ${tr('CAPEX',money(state.capex||2921881))}
+    ${tr('Аренда',money(state.rent||300000))}
+  </table>`;
 
   renderValidationPanels();
 }
+function renderLevelControls(){
+  document.querySelectorAll('[data-level-switch]').forEach(b=>{
+    b.classList.toggle('active',b.dataset.levelSwitch===state.activeLevel);
+  });
+  if($('activeLevelBadge'))$('activeLevelBadge').textContent=levelTitle();
+  if($('planLevelBadge'))$('planLevelBadge').textContent=`${levelTitle()} · ${fmt1(levelArea(state.activeLevel))} м²`;
+  if($('mezzanineL'))$('mezzanineL').value=state.mezzanineL;
+  if($('mezzanineW'))$('mezzanineW').value=state.mezzanineW;
+}
 
-function renderAll(full=true){save();if(full){renderColumns();renderSelected()}draw();renderEmu();renderTabs()}
+function switchLevel(level){
+  if(!['ground','mezzanine'].includes(level))return;
+  state.activeLevel=level;
+  selected={kind:null,index:null};
+  drag=null;
+  renderAll();
+}
+
+function renderAll(full=true){
+  save();
+  renderLevelControls();
+  if(full){renderColumns();renderSelected()}
+  draw();renderEmu();renderTabs();
+}
 
 
 function getSelectedObject(){
@@ -967,8 +1146,9 @@ function rotateSelected(){
   o.w=o.h;
   o.h=oldW;
   o.rotation=((o.rotation||0)+90)%360;
-  o.x=clamp(o.x,0,Math.max(0,state.roomL-o.w));
-  o.y=clamp(o.y,0,Math.max(0,state.roomW-o.h));
+  const bd=levelDims(entityLevel(o)==='both'?state.activeLevel:entityLevel(o));
+  o.x=clamp(o.x,0,Math.max(0,bd.L-o.w));
+  o.y=clamp(o.y,0,Math.max(0,bd.W-o.h));
   renderAll();
 }
 
@@ -983,8 +1163,9 @@ function cloneSelected(){
   const src=arr[selected.index];
   if(!src) return;
   const copy=structuredClone(src);
-  copy.x=clamp((copy.x||0)+0.5,0,Math.max(0,state.roomL-copy.w));
-  copy.y=clamp((copy.y||0)+0.5,0,Math.max(0,state.roomW-copy.h));
+  const bd=levelDims(entityLevel(copy)==='both'?state.activeLevel:entityLevel(copy));
+  copy.x=clamp((copy.x||0)+0.5,0,Math.max(0,bd.L-copy.w));
+  copy.y=clamp((copy.y||0)+0.5,0,Math.max(0,bd.W-copy.h));
 
   // Базовые системные зоны не клонируем с тем же уникальным именем.
   if(selected.kind==='zone' && ['Хранение','Центральный проход','Приёмка','Сборка','Отгрузка'].includes(copy.name)){
@@ -1022,9 +1203,6 @@ function deleteSelected(){
 
 
 function addTemplate(template){
-  const b=rackCandidateArea();
-  const x=clamp(b.x+b.w*.45,0,Math.max(0,state.roomL-2));
-  const y=clamp(b.y+b.h*.45,0,Math.max(0,state.roomW-2));
   const catalog={
     courier:{name:'Зона курьеров',type:'process',zoneRole:'optional',w:2.5,h:2,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
     returns:{name:'Возвраты',type:'process',zoneRole:'process',w:2.5,h:2,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
@@ -1032,25 +1210,44 @@ function addTemplate(template){
     buffer_out:{name:'Буфер отгрузки',type:'process',zoneRole:'process',w:2.5,h:1.6,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
     packing:{name:'Упаковка',type:'process',zoneRole:'process',w:2.4,h:1.8,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
     quality:{name:'Контроль качества',type:'process',zoneRole:'process',w:2.2,h:1.8,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
+    picking:{name:'Сборка',type:'process',zoneRole:'process',level:'mezzanine',w:5,h:2.5,affectsCapacity:false,blocksStorage:true,affectsFlow:true,needsCamera:true},
     pallet:{name:'Паллетная зона',type:'storage',zoneRole:'optional',w:2.4,h:2.4,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true},
     charging:{name:'Зарядка ТСД',type:'equipment',zoneRole:'service',w:1.4,h:1,affectsCapacity:true,blocksStorage:true,affectsFlow:false,needsCamera:false},
     table:{name:'Стол',type:'equipment',zoneRole:'optional',w:1.4,h:.8,affectsCapacity:true,blocksStorage:true,affectsFlow:false,needsCamera:false},
     camera:{name:'Ручная камера',type:'equipment',zoneRole:'optional',w:.35,h:.35,affectsCapacity:false,blocksStorage:false,affectsFlow:false,needsCamera:false,objectKind:'camera'},
     door:{name:'Дверь',type:'service',zoneRole:'hard',w:1.2,h:.25,affectsCapacity:true,blocksStorage:true,affectsFlow:false,needsCamera:false,objectKind:'door'},
+    vertical:{name:'Лестница / подъёмник',type:'service',zoneRole:'hard',level:'both',w:1.8,h:1.8,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:true,objectKind:'vertical_link'},
     custom:{name:'Своя зона',type:'custom',zoneRole:'optional',w:2,h:2,affectsCapacity:true,blocksStorage:true,affectsFlow:false,needsCamera:false}
   };
   const base=catalog[template]||catalog.custom;
-  const o={...base,x,y,rotation:0};
-  o.x=clamp(o.x,0,Math.max(0,state.roomL-o.w));
-  o.y=clamp(o.y,0,Math.max(0,state.roomW-o.h));
-  state.objects.push(o);
-  selected={kind:'object',index:state.objects.length-1};
+  const level=base.level||state.activeLevel;
+  const bd=levelDims(level==='both'?state.activeLevel:level);
+  const o={...base,level,rotation:0};
+  o.w=Math.min(o.w,Math.max(.3,bd.L));
+  o.h=Math.min(o.h,Math.max(.3,bd.W));
+  o.x=clamp(bd.L*.45,0,Math.max(0,bd.L-o.w));
+  o.y=clamp(bd.W*.45,0,Math.max(0,bd.W-o.h));
+
+  if(template==='picking'){
+    const existing=(state.zones||[]).find(z=>z.name==='Сборка');
+    if(existing){
+      selected={kind:'zone',index:state.zones.indexOf(existing)};
+      state.activeLevel='mezzanine';
+      renderAll();
+      return;
+    }
+    state.zones.push(o);
+    selected={kind:'zone',index:state.zones.length-1};
+    state.activeLevel='mezzanine';
+  }else{
+    state.objects.push(o);
+    selected={kind:'object',index:state.objects.length-1};
+  }
   renderAll();
 }
-
-const PROJECTS_KEY='mfcPlannerProjectsV76';
-const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV76';
-let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||localStorage.getItem('mfcPlannerCurrentProjectV744')||localStorage.getItem('mfcPlannerCurrentProjectV743')||'';
+const PROJECTS_KEY='mfcPlannerProjectsV77';
+const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV77';
+let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||localStorage.getItem('mfcPlannerCurrentProjectV76')||localStorage.getItem('mfcPlannerCurrentProjectV744')||localStorage.getItem('mfcPlannerCurrentProjectV743')||'';
 
 function escapeHtml(s){return String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
 function readProjects(){
@@ -1058,7 +1255,7 @@ function readProjects(){
     let p=JSON.parse(localStorage.getItem(PROJECTS_KEY)||'[]');
     if(!Array.isArray(p)) p=[];
     if(!p.length){
-      const legacyKeys=['mfcPlannerProjectsV744','mfcPlannerProjectsV743'];
+      const legacyKeys=['mfcPlannerProjectsV76','mfcPlannerProjectsV744','mfcPlannerProjectsV743'];
       for(const key of legacyKeys){
         const legacy=JSON.parse(localStorage.getItem(key)||'[]');
         if(Array.isArray(legacy)&&legacy.length){
@@ -1183,10 +1380,10 @@ function setCentralAisleConfig(config){
 
   if(config.orientation==='horizontal'){
     const y=b.y+(b.h-width)*position;
-    state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',x:b.x,y,w:b.w,h:width,rotation:0,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
+    state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',level:'ground',x:b.x,y,w:b.w,h:width,rotation:0,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
   }else{
     const x=b.x+(b.w-width)*position;
-    state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',x,y:b.y,w:width,h:b.h,rotation:90,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
+    state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',level:'ground',x,y:b.y,w:width,h:b.h,rotation:90,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
   }
   state.centralAisle=width;
 }
@@ -1411,18 +1608,18 @@ function fillStorageToMaximum(){
 
 function validationSignature(){
   const payload={
-    roomL:state.roomL,roomW:state.roomW,
+    roomL:state.roomL,roomW:state.roomW,mezzanineL:state.mezzanineL,mezzanineW:state.mezzanineW,
     rackL:state.rackL,rackD:state.rackD,aisle:state.aisle,
     targetFlow:state.targetFlow,opsPerShift:state.opsPerShift,
     zones:(state.zones||[]).filter(z=>z.name!=='Хранение').map(z=>({
-      n:z.name,x:+z.x.toFixed(2),y:+z.y.toFixed(2),w:+z.w.toFixed(2),h:+z.h.toFixed(2),
+      n:z.name,level:entityLevel(z),x:+z.x.toFixed(2),y:+z.y.toFixed(2),w:+z.w.toFixed(2),h:+z.h.toFixed(2),
       r:z.rotation||0,role:z.zoneRole,bs:z.blocksStorage
     })),
     columns:(state.columns||[]).map(c=>({
-      x:+c.x.toFixed(2),y:+c.y.toFixed(2),w:+c.w.toFixed(2),h:+c.h.toFixed(2)
+      level:entityLevel(c),x:+c.x.toFixed(2),y:+c.y.toFixed(2),w:+c.w.toFixed(2),h:+c.h.toFixed(2)
     })),
     objects:(state.objects||[]).map(o=>({
-      n:o.name,k:o.objectKind,x:+o.x.toFixed(2),y:+o.y.toFixed(2),w:+o.w.toFixed(2),h:+o.h.toFixed(2),
+      n:o.name,k:o.objectKind,level:entityLevel(o),x:+o.x.toFixed(2),y:+o.y.toFixed(2),w:+o.w.toFixed(2),h:+o.h.toFixed(2),
       role:o.zoneRole,bs:o.blocksStorage
     }))
   };
@@ -1430,9 +1627,15 @@ function validationSignature(){
 }
 
 function entityInsideRoom(o){
-  return o.x>=-1e-6 && o.y>=-1e-6 &&
-    o.x+o.w<=state.roomL+1e-6 &&
-    o.y+o.h<=state.roomW+1e-6;
+  const inside=level=>{
+    const d=levelDims(level);
+    return o.x>=-1e-6 && o.y>=-1e-6 &&
+      o.x+o.w<=d.L+1e-6 &&
+      o.y+o.h<=d.W+1e-6;
+  };
+  return entityLevel(o)==='both'
+    ? inside('ground')&&inside('mezzanine')
+    : inside(entityLevel(o));
 }
 
 function expandAndClampRect(r,m){
@@ -1451,7 +1654,7 @@ function validationWalkableZone(z){
 
 function validationWalkableObject(o){
   if(!o)return false;
-  if(o.objectKind==='door'||o.objectKind==='camera') return true;
+  if(o.objectKind==='door'||o.objectKind==='camera'||o.objectKind==='vertical_link') return true;
   if(o.name==='Дверь'||o.name==='Ручная камера') return true;
   return false;
 }
@@ -1463,16 +1666,19 @@ function validationPointBlocked(p,rp){
     if(pointInRect(p,r)) return true;
   }
   for(const c of (state.columns||[])){
+    if(!onLevel(c,'ground')) continue;
     if(pointInRect(p,c)) return true;
   }
 
   for(const z of (state.zones||[])){
+    if(!onLevel(z,'ground')) continue;
     if(z.name==='Хранение') continue;
     if(validationWalkableZone(z)) continue;
     if(pointInRect(p,z)) return true;
   }
 
   for(const o of (state.objects||[])){
+    if(!onLevel(o,'ground')) continue;
     if(validationWalkableObject(o)) continue;
     if(o.blocksStorage===false && o.type!=='equipment') continue;
     if(pointInRect(p,o)) return true;
@@ -1523,6 +1729,7 @@ function buildValidationNetwork(rp){
   const seedNames=['Приёмка','Отгрузка','Вход поставщиков','Вход/выход персонала','Эвакуационный выход'];
 
   (state.zones||[]).forEach(z=>{
+    if(!onLevel(z,'ground')) return;
     if(seedNames.includes(z.name) || z.zoneRole==='process'){
       const i=nearestWalkable(z.x+z.w/2,z.y+z.h/2);
       if(i>=0)seeds.push(i);
@@ -1530,6 +1737,7 @@ function buildValidationNetwork(rp){
   });
 
   (state.objects||[]).forEach(o=>{
+    if(!onLevel(o,'ground')) return;
     if(o.objectKind==='door'||o.name==='Дверь'){
       const i=nearestWalkable(o.x+o.w/2,o.y+o.h/2);
       if(i>=0)seeds.push(i);
@@ -1709,10 +1917,13 @@ function buildValidationReport(){
   ];
   const outside=entities.filter(x=>!entityInsideRoom(x.o));
   if(outside.length){
-    push('bad','Есть объекты за границей помещения',`${outside.length} шт. Нужно вернуть их внутрь контура.`);
+    push('bad','Есть объекты за границей своего уровня',`${outside.length} шт. Нужно вернуть их внутрь контура соответствующего этажа.`);
   }else{
-    push('good','Все зоны и объекты находятся внутри помещения');
+    push('good','Все зоны и объекты находятся внутри контуров своих уровней');
   }
+  outside.forEach(x=>{
+    overlay.push({...x.o,severity:'bad',label:'За границей уровня',level:entityLevel(x.o)});
+  });
 
   // 2. Межрядный проход
   if(state.aisle<1){
@@ -1812,8 +2023,8 @@ function buildValidationReport(){
 
   // 6. Эвакуационный / обычные выходы — только геометрическая проверка буфера
   const evac=[
-    ...(state.zones||[]).filter(z=>z.name==='Эвакуационный выход'),
-    ...(state.objects||[]).filter(o=>String(o.name||'').toLowerCase().includes('эвакуац'))
+    ...(state.zones||[]).filter(z=>z.name==='Эвакуационный выход'&&onLevel(z,'ground')),
+    ...(state.objects||[]).filter(o=>onLevel(o,'ground')&&String(o.name||'').toLowerCase().includes('эвакуац'))
   ];
 
   if(!evac.length){
@@ -1834,8 +2045,8 @@ function buildValidationReport(){
 
   // 7. Входы / двери
   const accessMarkers=[
-    ...(state.zones||[]).filter(z=>['Вход поставщиков','Вход/выход персонала'].includes(z.name)),
-    ...(state.objects||[]).filter(o=>o.objectKind==='door'||o.name==='Дверь')
+    ...(state.zones||[]).filter(z=>onLevel(z,'ground')&&['Вход поставщиков','Вход/выход персонала'].includes(z.name)),
+    ...(state.objects||[]).filter(o=>onLevel(o,'ground')&&(o.objectKind==='door'||o.name==='Дверь'))
   ];
   if(!accessMarkers.length){
     push('warn','Нет отдельных входов/дверей','Маршрутная модель использует процессные зоны как точки доступа.');
@@ -1850,7 +2061,32 @@ function buildValidationReport(){
     else push('good','Подходы к входам/дверям по геометрии свободны');
   }
 
-  // 8. Сквозной поток персонала
+  // 8. Связь уровней
+  const picking=(state.zones||[]).find(z=>z.name==='Сборка');
+  const mezzProcesses=[
+    ...(state.zones||[]).filter(z=>onLevel(z,'mezzanine')&&z.type==='process'),
+    ...(state.objects||[]).filter(o=>onLevel(o,'mezzanine')&&o.type==='process')
+  ];
+  const verticalLinks=(state.objects||[]).filter(o=>o.objectKind==='vertical_link');
+
+  if(picking&&entityLevel(picking)==='mezzanine'){
+    push('good','Сборка вынесена на мезонин',`${fmt1(area(picking))} м² процессной зоны не занимают площадь хранения 1 этажа.`);
+  }else if(picking){
+    push('warn','Сборка находится на 1 этаже',`Она занимает ${fmt1(area(picking))} м² и может уменьшать доступную площадь хранения.`);
+  }else{
+    push('warn','Зона сборки не задана','Производительность сборки учитывается в потоке, но геометрическая зона отсутствует.');
+  }
+
+  if(mezzProcesses.length && !verticalLinks.length){
+    push('warn','Нет вертикальной связи с мезонином','Добавь «Лестница / подъёмник» через библиотеку объектов, чтобы зафиксировать связь уровней.');
+  }else if(mezzProcesses.length){
+    push('good','Вертикальная связь уровней задана',`${verticalLinks.length} объект(а) лестницы / подъёмника.`);
+  }
+  if(mezzProcesses.length){
+    push('info','Эвакуация мезонина не подтверждается этой моделью','Validation Engine показывает геометрию и связь уровней, но не рассчитывает обязательные нормативные пути эвакуации мезонина.');
+  }
+
+  // 9. Сквозной поток персонала
   const pm=processModel(state.targetFlow);
   if(pm.util>1){
     push('bad','Целевой поток выше мощности текущего состава',`${fmt(state.targetFlow)} ШК/мес против расчётной мощности ${fmt(pm.maxMonthly)} ШК/мес.`);
@@ -1962,7 +2198,7 @@ function runValidation(){
 }
 
 
-const inputIds=['roomL','roomW','roomH','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','cameraRange','coverageStep'];
+const inputIds=['roomL','roomW','roomH','mezzanineL','mezzanineW','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','cameraRange','coverageStep'];
 inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id]=parseFloat(el.value)||0;if(id==='centralAisle'){
   state.centralAisle=clamp(state.centralAisle,1.2,2.6);
   const c=getZone('Центральный проход');
@@ -1972,14 +2208,16 @@ inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id
   }
 }renderAll()}});
 $('layoutMode').value=state.layoutMode;$('layoutMode').onchange=()=>{state.layoutMode=$('layoutMode').value;renderAll()};
+document.querySelectorAll('[data-level-switch]').forEach(b=>b.onclick=()=>switchLevel(b.dataset.levelSwitch));
 $('optBtn').onclick=optimize;
 $('optSideBtn').onclick=optimize;
 $('centerAisleBtn').onclick=()=>{
+  state.activeLevel='ground';
   let c=getZone('Центральный проход');
   if(!c){
     const b=rackCandidateArea();
     c={
-      name:'Центральный проход',type:'service',
+      name:'Центральный проход',type:'service',level:'ground',
       x:b.x+b.w/2-state.centralAisle/2,y:b.y,
       w:state.centralAisle,h:b.h,
       rotation:90,
@@ -1990,7 +2228,11 @@ $('centerAisleBtn').onclick=()=>{
   centerCentralAisle();
   renderAll();
 };
-$('addColumnBtn').onclick=()=>{state.columns.push({x:6,y:3,w:.6,h:.6,rotation:0});selected={kind:'column',index:state.columns.length-1};renderAll()};
+$('addColumnBtn').onclick=()=>{
+  const bd=levelDims();
+  state.columns.push({x:Math.min(6,bd.L*.3),y:Math.min(3,bd.W*.3),w:.6,h:.6,rotation:0,level:state.activeLevel});
+  selected={kind:'column',index:state.columns.length-1};renderAll()
+};
 document.querySelectorAll('.objbtn').forEach(b=>b.onclick=()=>addTemplate(b.dataset.template));
 $('rotateBtn').onclick=()=>rotateSelected();$('cloneBtn').onclick=()=>cloneSelected();$('deleteBtn').onclick=()=>deleteSelected();
 $('saveBtn').onclick=()=>saveNamedProject(false);
@@ -2005,9 +2247,9 @@ $('applyVariantBtn').onclick=applySelectedVariant;
 $('fillStorageBtn').onclick=fillStorageToMaximum;
 $('validateBtn').onclick=runValidation;
 $('showValidationOverlay').onchange=()=>draw();
-$('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>$(id).value=state[id]);renderProjectSelector();renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.6.json';a.click();URL.revokeObjectURL(a.href)};
-$('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));selected={kind:null};inputIds.forEach(id=>$(id).value=state[id]);$('layoutMode').value=state.layoutMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
+$('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();migrateV69();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>{if($(id))$(id).value=state[id]});renderProjectSelector();renderAll()}};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.7.json';a.click();URL.revokeObjectURL(a.href)};
+$('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));sanitizeState();migrateSmartZones();migrateV69();selected={kind:null};inputIds.forEach(id=>{if($(id))$(id).value=state[id]});$('layoutMode').value=state.layoutMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
 
