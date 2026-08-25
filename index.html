@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 7.13</title>
-  <link rel="stylesheet" href="styles.css?v=7.13">
+  <title>MFC Planner 7.15</title>
+  <link rel="stylesheet" href="styles.css?v=7.15">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">7.13</span></div>
-    <div class="sub">Интерактивный конструктор: хранение, оборот, штат, мезонин, оптимизация и проверки</div>
+    <div class="brand">MFC Planner <span class="ver">7.15</span></div>
+    <div class="sub">Интерактивный конструктор: хранение, оборот, штат, этаж, оптимизация и проверки</div>
   </div>
   <div class="actions">
     <div class="project-switcher">
@@ -47,13 +47,13 @@
     <div class="headrow"><h3>Уровни 7.7</h3><span id="activeLevelBadge" class="level-badge">1 этаж</span></div>
     <div class="level-switch">
       <button type="button" class="level-btn active" data-level-switch="ground">1 этаж</button>
-      <button type="button" class="level-btn" data-level-switch="mezzanine">Мезонин</button>
+      <button type="button" class="level-btn" data-level-switch="mezzanine">Этаж</button>
     </div>
     <div class="grid2 level-dims">
-      <label>Мезонин, длина<input id="mezzanineL" type="number" step="0.1"></label>
-      <label>Мезонин, ширина<input id="mezzanineW" type="number" step="0.1"></label>
+      <label>Этаж, длина<input id="mezzanineL" type="number" step="0.1"></label>
+      <label>Этаж, ширина<input id="mezzanineW" type="number" step="0.1"></label>
     </div>
-    <div class="hint">Стеллажная вместимость считается по 1 этажу. Зоны мезонина участвуют в процессах, но не блокируют хранение внизу.</div>
+    <div class="hint">Стеллажная вместимость считается по 1 этажу. Зоны этажа участвуют в процессах, но не блокируют хранение внизу.</div>
   </section>
 
   <section class="panel emphasis">
@@ -228,7 +228,7 @@
 <main class="main">
   <section class="hero">
     <div class="card"><span>Площадь 1 этажа</span><b id="mArea"></b></div>
-    <div class="card"><span>Площадь мезонина</span><b id="mMezzArea"></b></div>
+    <div class="card"><span>Площадь этажа</span><b id="mMezzArea"></b></div>
     <div class="card"><span>Рабочая вместимость</span><b id="mCapacity"></b></div>
     <div class="card"><span>Макс. сквозной поток</span><b id="mThroughput"></b></div>
     <div class="card"><span>Камер</span><b id="mCams"></b></div>
@@ -257,7 +257,7 @@
     <div class="plan-levelbar">
       <div class="level-switch">
         <button type="button" class="level-btn active" data-level-switch="ground">1 этаж</button>
-        <button type="button" class="level-btn" data-level-switch="mezzanine">Мезонин</button>
+        <button type="button" class="level-btn" data-level-switch="mezzanine">Этаж</button>
       </div>
       <b id="planLevelBadge">1 этаж</b>
     </div>

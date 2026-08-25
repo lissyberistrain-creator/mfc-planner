@@ -87,7 +87,7 @@ function levelDims(level=state.activeLevel){
     : {L:state.roomL,W:state.roomW};
 }
 function levelTitle(level=state.activeLevel){
-  return level==='mezzanine'?'Мезонин':'1 этаж';
+  return level==='mezzanine'?'Этаж':'1 этаж';
 }
 function entityBounds(o){
   return levelDims(entityLevel(o)==='both'?state.activeLevel:entityLevel(o));
@@ -288,7 +288,7 @@ function optimize(){
     rotation:0,affectsCapacity:true,affectsFlow:false,needsCamera:true
   };
 
-  // На 1 этаже размещаем приёмку и отгрузку. Средний промежуток остаётся доступным хранению; сборка находится на мезонине.
+  // На 1 этаже размещаем приёмку и отгрузку. Средний промежуток остаётся доступным хранению; сборка находится на этаже.
   let acceptRatio=0.30,pickRatio=0.42,shipRatio=0.28;
   if(state.layoutMode==='capacity'){acceptRatio=0.29;pickRatio=0.39;shipRatio=0.32;}
   if(state.layoutMode==='flow'){acceptRatio=0.31;pickRatio=0.45;shipRatio=0.24;}
@@ -948,7 +948,7 @@ function draw(){
       });
     }
   }else{
-    add('text',{x:ox+12,y:oy+22,class:'levelCanvasTitle'}).textContent='Мезонин · процессный уровень';
+    add('text',{x:ox+12,y:oy+22,class:'levelCanvasTitle'}).textContent='Этаж · процессный уровень';
     if($('showValidationOverlay')?.checked && validationIsCurrent()){
       (validationOverlayRects||[]).filter(v=>['mezzanine','both'].includes(v.level)).forEach(v=>{
         add('rect',{
@@ -1096,7 +1096,7 @@ function draw(){
     const zones=(state.zones||[]).filter(z=>z.name!=='Хранение'&&onLevel(z,'mezzanine'));
     const process=zones.filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)
       +(state.objects||[]).filter(o=>onLevel(o,'mezzanine')&&o.type==='process').reduce((s,o)=>s+area(o),0);
-    $('layoutSummary').textContent=`Мезонин · ${fmt1(a.mezzanineArea)} м² · процессные зоны ${fmt1(process)} м² · не уменьшает вместимость стеллажей 1 этажа`;
+    $('layoutSummary').textContent=`Этаж · ${fmt1(a.mezzanineArea)} м² · процессные зоны ${fmt1(process)} м² · не уменьшает вместимость стеллажей 1 этажа`;
   }
 }
 function renderSelected(){
@@ -1111,7 +1111,7 @@ function renderSelected(){
   <label>Уровень
     <select id="selLevel">
       <option value="ground">1 этаж</option>
-      <option value="mezzanine">Мезонин</option>
+      <option value="mezzanine">Этаж</option>
       <option value="both">Оба уровня</option>
     </select>
   </label>
@@ -1128,7 +1128,7 @@ function renderSelected(){
     <label><input id="capToggle" type="checkbox" ${obj.affectsCapacity?'checked':''}> влияет на аналитику вместимости</label>
     <label><input id="flowToggle" type="checkbox" ${obj.affectsFlow?'checked':''}> влияет на поток</label>
     <label><input id="camToggle" type="checkbox" ${obj.needsCamera?'checked':''}> нужен контроль камерой</label>
-  </div><div class="hint">Уровень: ${lvl==='both'?'оба уровня':levelTitle(lvl)}. Объекты мезонина не блокируют стеллажи 1 этажа.</div>`:''}`;
+  </div><div class="hint">Уровень: ${lvl==='both'?'оба уровня':levelTitle(lvl)}. Объекты этажа не блокируют стеллажи 1 этажа.</div>`:''}`;
 
   if($('selLevel')){
     const fixed=fixedEntityLevel(obj);
@@ -1176,7 +1176,7 @@ function renderColumns(){
 }
 function renderEmu(){
   const m=processModel(state.simFlow),ok=m.util<=1,total=m.total||1;
-  const pickLevel=((state.zones||[]).find(z=>z.name==='Сборка')?.level)==='mezzanine'?'мезонин':'1 этаж';
+  const pickLevel=((state.zones||[]).find(z=>z.name==='Сборка')?.level)==='mezzanine'?'этаж':'1 этаж';
   $('emulatorBody').innerHTML=`<div class="emugrid">
   <div class="emukpi ${ok?'goodbg':'badbg'}"><span>Статус</span><b>${ok?'Поток проходит':'Выше мощности'}</b><small>${fmt(state.simFlow)} ШК/мес</small></div>
   <div class="emukpi"><span>Загрузка</span><b>${fmt1(m.util*100)}%</b></div>
@@ -1216,7 +1216,7 @@ function renderTabs(){
     ${tr('Изменение к базе',`${scale.storageDelta>=0?'+':''}${fmt(scale.storageDelta)} ШК (${scale.storageDeltaPct>=0?'+':''}${fmt1(scale.storageDeltaPct)}%)`)}
     ${tr('Изменение площади к базе',`${scale.areaDelta>=0?'+':''}${fmt1(scale.areaDelta)} м² (${scale.areaDeltaPct>=0?'+':''}${fmt1(scale.areaDeltaPct)}%)`)}
     ${tr('Центральный проход',centralText)}
-    ${tr('Мезонин','не уменьшает расчёт стеллажной вместимости 1 этажа')}
+    ${tr('Этаж','не уменьшает расчёт стеллажной вместимости 1 этажа')}
   </table>`;
 
   const oneTurn=processModel(a.cap);
@@ -1304,7 +1304,7 @@ function renderTabs(){
   if($('tab-levels')){
     $('tab-levels').innerHTML=`<div class="cards3">
       ${metric('1 этаж',fmt1(a.groundArea)+' м²',fmt1(a.groundProcessArea)+' м² процессов')}
-      ${metric('Мезонин',fmt1(a.mezzanineArea)+' м²',fmt1(a.mezzanineProcessArea)+' м² процессов')}
+      ${metric('Этаж',fmt1(a.mezzanineArea)+' м²',fmt1(a.mezzanineProcessArea)+' м² процессов')}
       ${metric('Вертикальные связи',verticalLinks.length,verticalLinks.length?'лестница / подъёмник':'добавь через библиотеку')}
     </div>
     <table class="tbl"><tr><th>Этап</th><th>Уровень</th><th>Комментарий</th></tr>
@@ -1323,15 +1323,15 @@ function renderTabs(){
   </div>
   <table class="tbl"><tr><th>Аналитика</th><th>Значение</th></tr>
     ${tr('Площадь 1 этажа',fmt1(a.groundArea)+' м²')}
-    ${tr('Площадь мезонина',fmt1(a.mezzanineArea)+' м²')}
+    ${tr('Площадь этажа',fmt1(a.mezzanineArea)+' м²')}
     ${tr('Суммарная моделируемая площадь уровней',fmt1(a.totalOperationalArea)+' м²')}
     ${tr('Доля 1 этажа, занятая стеллажами',fmt1(a.rackUsedArea/a.groundArea*100)+'%')}
     ${tr('Неиспользуемая доступная площадь 1 этажа',fmt1(a.unusedRackableArea)+' м²')}
     ${tr('Процессные зоны 1 этажа',fmt1(a.groundProcessArea)+' м²')}
-    ${tr('Процессные зоны мезонина',fmt1(a.mezzanineProcessArea)+' м²')}
+    ${tr('Процессные зоны этажа',fmt1(a.mezzanineProcessArea)+' м²')}
     ${tr('Секций на 1 м² первого этажа',fmt1(a.rp.total/a.groundArea))}
     ${tr('ШК на 1 м² первого этажа',fmt1(a.cap/a.groundArea))}
-    ${tr('Сборка',picking&&entityLevel(picking)==='mezzanine'?'мезонин · площадь 1 этажа не занимает':'проверь уровень')}
+    ${tr('Сборка',picking&&entityLevel(picking)==='mezzanine'?'этаж · площадь 1 этажа не занимает':'проверь уровень')}
     ${tr('Поток при выбранном обороте',fmt(scale.plannedFlow)+' ШК/мес')}
     ${tr('Мощность текущего штата',fmt(scale.currentMax)+' ШК/мес')}
     ${tr('Мощность после добавления операторов',fmt(scale.afterAddMax)+' ШК/мес')}
@@ -2330,7 +2330,7 @@ function buildValidationReport(){
   const verticalLinks=(state.objects||[]).filter(o=>o.objectKind==='vertical_link');
 
   if(picking&&entityLevel(picking)==='mezzanine'){
-    push('good','Сборка вынесена на мезонин',`${fmt1(area(picking))} м² процессной зоны не занимают площадь хранения 1 этажа.`);
+    push('good','Сборка вынесена на этаж',`${fmt1(area(picking))} м² процессной зоны не занимают площадь хранения 1 этажа.`);
   }else if(picking){
     push('warn','Сборка находится на 1 этаже',`Она занимает ${fmt1(area(picking))} м² и может уменьшать доступную площадь хранения.`);
   }else{
@@ -2338,12 +2338,12 @@ function buildValidationReport(){
   }
 
   if(mezzProcesses.length && !verticalLinks.length){
-    push('warn','Нет вертикальной связи с мезонином','Добавь «Лестница / подъёмник» через библиотеку объектов, чтобы зафиксировать связь уровней.');
+    push('warn','Нет вертикальной связи с этажом','Добавь «Лестница / подъёмник» через библиотеку объектов, чтобы зафиксировать связь уровней.');
   }else if(mezzProcesses.length){
     push('good','Вертикальная связь уровней задана',`${verticalLinks.length} объект(а) лестницы / подъёмника.`);
   }
   if(mezzProcesses.length){
-    push('info','Эвакуация мезонина не подтверждается этой моделью','Validation Engine показывает геометрию и связь уровней, но не рассчитывает обязательные нормативные пути эвакуации мезонина.');
+    push('info','Эвакуация этажа не подтверждается этой моделью','Validation Engine показывает геометрию и связь уровней, но не рассчитывает обязательные нормативные пути эвакуации этажа.');
   }
 
   // 9. Сквозной поток персонала
