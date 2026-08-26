@@ -209,3 +209,19 @@ h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9
 .gap-toggle.off{background:#f3eef6;color:#766b7d;border:1px solid #ddd4e3}
 .disabled-field{opacity:.48}
 .hidden{display:none!important}
+
+
+/* MFC Planner 8.2 — Storage Accessibility Engine */
+.dot.aisle{background:#efe6b9;border:1px solid #c9b766}
+.workingAisle{
+  fill:#fff4b8;
+  fill-opacity:.52;
+  stroke:#c4aa43;
+  stroke-width:.7;
+  stroke-dasharray:4 3;
+  pointer-events:none;
+}
+.deadEndAisle{
+  fill:#ffe1ad;
+  stroke:#cf8e28;
+}

@@ -430,17 +430,153 @@ function rackCellAllowed(rect, blockers){
   return true;
 }
 
+
+function rackAccessBlockers(){
+  const hard=[];
+
+  const zoneWalkable=z=>{
+    if(!z) return false;
+    if(z.type==='process') return true;
+    if(['Центральный проход','Коридор персонала','Приёмка','Отгрузка','Вход поставщиков','Вход/выход персонала','Эвакуационный выход'].includes(z.name)) return true;
+    return /коридор|проход|вход|выход/i.test(String(z.name||''));
+  };
+
+  (state.zones||[]).forEach(z=>{
+    if(!onLevel(z,'ground') || z.name==='Хранение') return;
+    if(zoneWalkable(z)) return;
+    hard.push({x:z.x,y:z.y,w:z.w,h:z.h,name:z.name,kind:'zone'});
+  });
+
+  (state.columns||[]).forEach((c,i)=>{
+    if(!onLevel(c,'ground')) return;
+    hard.push({x:c.x,y:c.y,w:c.w,h:c.h,name:'Колонна '+(i+1),kind:'column'});
+  });
+
+  (state.objects||[]).forEach((o,i)=>{
+    if(!onLevel(o,'ground')) return;
+    if(o.objectKind==='door' || o.name==='Дверь' || o.objectKind==='camera' || o.name==='Ручная камера') return;
+    if(o.type==='process') return;
+    if(o.blocksStorage===false && o.type!=='equipment') return;
+    hard.push({x:o.x,y:o.y,w:o.w,h:o.h,name:o.name||('Объект '+(i+1)),kind:'object'});
+  });
+
+  return hard;
+}
+
+function rectInsideRoom(r){
+  return r.x>=-1e-9 && r.y>=-1e-9 &&
+    r.x+r.w<=state.roomL+1e-9 &&
+    r.y+r.h<=state.roomW+1e-9;
+}
+
+function splitRackPairGroups(pairs,orientation,rackLength){
+  if(!pairs.length) return [];
+  const axis=orientation==='horizontal'?'x':'y';
+  const sorted=[...pairs].sort((a,b)=>a[axis]-b[axis]);
+  const groups=[];
+  let current=[sorted[0]];
+
+  for(let i=1;i<sorted.length;i++){
+    const delta=sorted[i][axis]-sorted[i-1][axis];
+    if(delta<=rackLength*1.08){
+      current.push(sorted[i]);
+    }else{
+      groups.push(current);
+      current=[sorted[i]];
+    }
+  }
+  groups.push(current);
+  return groups;
+}
+
+function aisleRectForGroup(group,orientation,street,rackLength,rackDepth,aisle){
+  const first=group[0];
+  const last=group[group.length-1];
+
+  if(orientation==='horizontal'){
+    return {
+      x:first.x,
+      y:street.y+rackDepth,
+      w:(last.x+rackLength)-first.x,
+      h:aisle
+    };
+  }
+  return {
+    x:street.x+rackDepth,
+    y:first.y,
+    w:aisle,
+    h:(last.y+rackLength)-first.y
+  };
+}
+
+function aisleEndProbe(aisleRect,orientation,side,aisle){
+  // Чтобы считать конец рабочим, нужен свободный участок не уже самого прохода.
+  const depth=Math.max(.4,aisle);
+
+  if(orientation==='horizontal'){
+    return side==='start'
+      ? {x:aisleRect.x-depth,y:aisleRect.y,w:depth,h:aisleRect.h}
+      : {x:aisleRect.x+aisleRect.w,y:aisleRect.y,w:depth,h:aisleRect.h};
+  }
+
+  return side==='start'
+    ? {x:aisleRect.x,y:aisleRect.y-depth,w:aisleRect.w,h:depth}
+    : {x:aisleRect.x,y:aisleRect.y+aisleRect.h,w:aisleRect.w,h:depth};
+}
+
+function aisleEndAccessible(aisleRect,orientation,side,aisle,hardAccessBlockers){
+  const probe=aisleEndProbe(aisleRect,orientation,side,aisle);
+
+  // Стена сама по себе не считается входом в улицу.
+  if(!rectInsideRoom(probe)) return false;
+
+  // ЦП, приемка, отгрузка и другие рабочие проходные зоны сюда не входят:
+  // они исключены из hardAccessBlockers и поэтому могут служить входом.
+  if(hardAccessBlockers.some(b=>rectsOverlap(probe,b))) return false;
+
+  return true;
+}
+
+function racksForAccessibleGroup(group,orientation,street,rackLength,rackDepth,aisle,streetIndex){
+  const out=[];
+
+  group.forEach(p=>{
+    if(orientation==='horizontal'){
+      out.push(
+        {x:p.x,y:street.y,w:rackLength,h:rackDepth,street:streetIndex,side:'A'},
+        {x:p.x,y:street.y+rackDepth+aisle,w:rackLength,h:rackDepth,street:streetIndex,side:'B'}
+      );
+    }else{
+      out.push(
+        {x:street.x,y:p.y,w:rackDepth,h:rackLength,street:streetIndex,side:'A'},
+        {x:street.x+rackDepth+aisle,y:p.y,w:rackDepth,h:rackLength,street:streetIndex,side:'B'}
+      );
+    }
+  });
+
+  return out;
+}
+
 function buildFreeRackPlan(orientation, offset=0){
   const bounds=rackCandidateArea();
   const blockers=rackBlockers();
+  const hardAccessBlockers=rackAccessBlockers();
+
   const racks=[];
   const streets=[];
+  const aisles=[];
+
+  let rejectedSections=0;
+  let deadEndAisles=0;
 
   const rackLength=Math.max(.2,state.rackL);
   const rackDepth=Math.max(.15,state.rackD);
   const aisle=Math.max(.4,state.aisle);
 
-  // Одна улица: стеллаж + рабочий проход + стеллаж.
+  // Повторяющийся модуль:
+  // [стеллаж] [рабочий проход] [стеллаж]
+  // Следующий модуль может начинаться сразу за вторым стеллажом:
+  // соседние стеллажи тогда стоят back-to-back и обслуживаются с разных проходов.
   const streetWidth=rackDepth+aisle+rackDepth;
 
   const allowed=rect=>{
@@ -450,58 +586,103 @@ function buildFreeRackPlan(orientation, offset=0){
     return !blockers.some(b=>rectsOverlap(rect,b));
   };
 
+  const candidateStreets=[];
+
   if(orientation==='horizontal'){
-    // Улица идет вдоль X. Два ряда смотрят друг на друга через проход.
     for(let y=bounds.y+offset; y+streetWidth<=bounds.y+bounds.h+1e-9; y+=streetWidth){
       const street={orientation:'horizontal',x:bounds.x,y,w:bounds.w,h:streetWidth,sections:0,pairs:[]};
 
       for(let x=bounds.x; x+rackLength<=bounds.x+bounds.w+1e-9; x+=rackLength){
-        const rackA={x,y,w:rackLength,h:rackDepth,street:streets.length,side:'A'};
+        const rackA={x,y,w:rackLength,h:rackDepth};
         const aisleCell={x,y:y+rackDepth,w:rackLength,h:aisle};
-        const rackB={x,y:y+rackDepth+aisle,w:rackLength,h:rackDepth,street:streets.length,side:'B'};
+        const rackB={x,y:y+rackDepth+aisle,w:rackLength,h:rackDepth};
 
-        // Для рабочей улицы обязательно должны существовать обе стороны
-        // и сам проход между ними.
         if(allowed(rackA) && allowed(aisleCell) && allowed(rackB)){
-          racks.push(rackA,rackB);
           street.pairs.push({x,y});
-          street.sections+=2;
         }
       }
 
-      if(street.sections>0) streets.push(street);
+      if(street.pairs.length) candidateStreets.push(street);
     }
   }else{
-    // Улица идет вдоль Y.
     for(let x=bounds.x+offset; x+streetWidth<=bounds.x+bounds.w+1e-9; x+=streetWidth){
       const street={orientation:'vertical',x,y:bounds.y,w:streetWidth,h:bounds.h,sections:0,pairs:[]};
 
       for(let y=bounds.y; y+rackLength<=bounds.y+bounds.h+1e-9; y+=rackLength){
-        const rackA={x,y,w:rackDepth,h:rackLength,street:streets.length,side:'A'};
+        const rackA={x,y,w:rackDepth,h:rackLength};
         const aisleCell={x:x+rackDepth,y,w:aisle,h:rackLength};
-        const rackB={x:x+rackDepth+aisle,y,w:rackDepth,h:rackLength,street:streets.length,side:'B'};
+        const rackB={x:x+rackDepth+aisle,y,w:rackDepth,h:rackLength};
 
         if(allowed(rackA) && allowed(aisleCell) && allowed(rackB)){
-          racks.push(rackA,rackB);
           street.pairs.push({x,y});
-          street.sections+=2;
         }
       }
 
-      if(street.sections>0) streets.push(street);
+      if(street.pairs.length) candidateStreets.push(street);
     }
   }
+
+  candidateStreets.forEach((street,streetIndex)=>{
+    const groups=splitRackPairGroups(street.pairs,orientation,rackLength);
+    const keptPairs=[];
+
+    groups.forEach(group=>{
+      const aisleRect=aisleRectForGroup(group,orientation,street,rackLength,rackDepth,aisle);
+      const accessStart=aisleEndAccessible(aisleRect,orientation,'start',aisle,hardAccessBlockers);
+      const accessEnd=aisleEndAccessible(aisleRect,orientation,'end',aisle,hardAccessBlockers);
+
+      // Ключевое правило 8.2:
+      // если сотрудник не может войти в рабочий проход ни с одного конца,
+      // обе стороны этого участка стеллажей НЕ размещаем и НЕ считаем в ШК.
+      if(!accessStart && !accessEnd){
+        rejectedSections+=group.length*2;
+        return;
+      }
+
+      if(accessStart !== accessEnd) deadEndAisles++;
+
+      const groupRacks=racksForAccessibleGroup(
+        group,orientation,street,rackLength,rackDepth,aisle,streetIndex
+      );
+      racks.push(...groupRacks);
+      keptPairs.push(...group);
+
+      aisles.push({
+        ...aisleRect,
+        orientation,
+        street:streetIndex,
+        accessStart,
+        accessEnd,
+        deadEnd:accessStart !== accessEnd,
+        sections:group.length*2
+      });
+    });
+
+    if(keptPairs.length){
+      streets.push({
+        ...street,
+        pairs:keptPairs,
+        sections:keptPairs.length*2
+      });
+    }
+  });
 
   return {
     orientation,
     total:racks.length,
+    accessibleSections:racks.length,
+    rejectedSections,
     racks,
+    aisles,
     streets,
     streetCount:streets.length,
+    aisleCount:aisles.length,
+    deadEndAisles,
     streetWidth,
     rackArea:racks.reduce((s,r)=>s+r.w*r.h,0)
   };
 }
+
 function freeRackPlan(){
   const rackDepth=Math.max(.15,state.rackD);
   const aisle=Math.max(.4,state.aisle);
@@ -531,9 +712,14 @@ function freeRackPlan(){
   return candidates[0] || {
     orientation:'horizontal',
     total:0,
+    accessibleSections:0,
+    rejectedSections:0,
     racks:[],
+    aisles:[],
     streets:[],
     streetCount:0,
+    aisleCount:0,
+    deadEndAisles:0,
     streetWidth
   };
 }
@@ -928,6 +1114,17 @@ function draw(){
       });
     });
 
+    // Рабочие проходы, через которые сотрудник реально обслуживает обе стороны улицы.
+    (actualRackPlan.aisles||[]).forEach(a=>{
+      add('rect',{
+        x:ox+a.x*sc,
+        y:oy+a.y*sc,
+        width:Math.max(2,a.w*sc),
+        height:Math.max(2,a.h*sc),
+        class:a.deadEnd?'workingAisle deadEndAisle':'workingAisle'
+      });
+    });
+
     (actualRackPlan.racks||[]).forEach(r=>{
       add('rect',{
         x:ox+r.x*sc+1,y:oy+r.y*sc+1,
@@ -1094,7 +1291,7 @@ function draw(){
   };
 
   if(state.activeLevel==='ground'){
-    $('layoutSummary').textContent=`1 этаж · ${fmt1(a.groundArea)} м² · улиц ${a.rp.streetCount||0} · секций ${a.rp.total} · стеллажи ${fmt1(a.rp.rackArea||0)} м² · свободный остаток ${fmt1(unusedRackableArea())} м² · боковые отступы ${state.sideWallGapEnabled?fmt1(state.sideWallGap)+' м':'выкл'}`;
+    $('layoutSummary').textContent=`1 этаж · ${fmt1(a.groundArea)} м² · улиц ${a.rp.streetCount||0} · рабочих проходов ${a.rp.aisleCount||0} · доступных секций ${a.rp.total} · отсеяно недоступных ${a.rp.rejectedSections||0} · стеллажи ${fmt1(a.rp.rackArea||0)} м² · боковые отступы ${state.sideWallGapEnabled?fmt1(state.sideWallGap)+' м':'выкл'}`;
   }else{
     const zones=(state.zones||[]).filter(z=>z.name!=='Хранение'&&onLevel(z,'mezzanine'));
     const process=zones.filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)
@@ -1209,13 +1406,16 @@ function renderTabs(){
 
   $('tab-capacity').innerHTML=`<div class="cards3">
     ${metric('Площадь хранения 1 этажа',fmt1(a.storageArea)+' м²')}
-    ${metric('Секции',fmt(a.rp.total))}
+    ${metric('Доступные секции',fmt(a.rp.total),`отсеяно ${fmt(a.rp.rejectedSections||0)}`)}
     ${metric('Рабочая вместимость',fmt(a.cap)+' ШК',state.fillPct+'% заполнения')}
   </div>
   <table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr>
     ${tr('Полезный объём',fmt1(a.vol)+' м³')}
     ${tr('Вместимость 100%',fmt(a.cap100)+' ШК')}
     ${tr('Рабочая вместимость',fmt(a.cap)+' ШК')}
+    ${tr('Рабочие проходы',fmt(a.rp.aisleCount||0))}
+    ${tr('Тупиковые проходы',fmt(a.rp.deadEndAisles||0))}
+    ${tr('Недоступные секции исключены',fmt(a.rp.rejectedSections||0))}
     ${tr('Изменение к базе',`${scale.storageDelta>=0?'+':''}${fmt(scale.storageDelta)} ШК (${scale.storageDeltaPct>=0?'+':''}${fmt1(scale.storageDeltaPct)}%)`)}
     ${tr('Изменение площади к базе',`${scale.areaDelta>=0?'+':''}${fmt1(scale.areaDelta)} м² (${scale.areaDeltaPct>=0?'+':''}${fmt1(scale.areaDeltaPct)}%)`)}
     ${tr('Центральный проход',centralText)}
@@ -2502,6 +2702,15 @@ function buildValidationReport(){
   }
 
   // 4. Доступность улиц
+  // Storage Accessibility Engine уже исключает участки, у которых нет входа
+  // в рабочий проход ни с одного конца.
+  if((rp.rejectedSections||0)>0){
+    push('warn','Недоступные секции автоматически исключены',
+      `${rp.rejectedSections} секций не вошли в вместимость, потому что к их рабочему проходу нельзя подойти.`);
+  }else{
+    push('good','Недоступных секций Storage Engine не обнаружил');
+  }
+
   let accessible=0,inaccessible=0,deadEnds=0,twoWay=0;
   const distances=[];
   let longestSegment=0;
@@ -2817,7 +3026,7 @@ $('cloudApiBase').onchange=()=>{
   renderCloudStatus();
 };
 $('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();migrateV69();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>{if($(id))$(id).value=state[id]});if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderProjectSelector();renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v8.1.json';a.click();URL.revokeObjectURL(a.href)};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v8.2.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));sanitizeState();migrateSmartZones();migrateV69();selected={kind:null};inputIds.forEach(id=>{if($(id))$(id).value=state[id]});$('layoutMode').value=state.layoutMode;if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
