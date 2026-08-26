@@ -3,16 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 7.15</title>
-  <link rel="stylesheet" href="styles.css?v=7.15">
+  <title>MFC Planner 8.1</title>
+  <link rel="stylesheet" href="styles.css?v=8.1">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">7.15</span></div>
-    <div class="sub">Интерактивный конструктор: хранение, оборот, штат, этаж, оптимизация и проверки</div>
+    <div class="brand">MFC Planner <span class="ver">8.1</span></div>
+    <div class="sub">Интерактивный конструктор: облачные проекты, хранение, штат, этажи и оптимизация</div>
   </div>
   <div class="actions">
+    <span id="cloudTopStatus" class="cloud-top-status local">● локально</span>
     <div class="project-switcher">
       <select id="projectSelect" title="Сохранённые планы"><option value="">Мои планы</option></select>
       <button id="saveBtn" class="btn">Сохранить план</button>
@@ -29,9 +30,39 @@
 <div class="layout">
 <aside class="sidebar">
   <section class="panel project-panel">
-    <h3>Проект</h3>
+    <div class="headrow">
+      <h3>Проект</h3>
+      <span id="cloudStatusBadge" class="cloud-badge local">Локально</span>
+    </div>
     <div class="project-current"><span>Текущий план</span><b id="currentProjectName">Черновик</b></div>
-    <div class="hint" id="projectSaveStatus">Изменения сохраняются в локальный черновик автоматически.</div>
+    <div class="hint" id="projectSaveStatus">Локальный черновик используется как резервная копия.</div>
+
+    <div class="cloud-box">
+      <label>Cloud API
+        <input id="cloudApiBase" type="url" placeholder="https://api.example.com">
+      </label>
+      <button id="cloudCheckBtn" class="btn secondary wide">Проверить сервер</button>
+
+      <div id="cloudLoggedOut">
+        <label>Email<input id="cloudEmail" type="email" autocomplete="username"></label>
+        <label>Пароль<input id="cloudPassword" type="password" autocomplete="current-password"></label>
+        <div class="cloud-auth-actions">
+          <button id="cloudLoginBtn" class="btn primary">Войти</button>
+          <button id="cloudRegisterBtn" class="btn secondary">Регистрация</button>
+        </div>
+      </div>
+
+      <div id="cloudLoggedIn" class="hidden">
+        <div class="cloud-user">
+          <span>Облачный аккаунт</span>
+          <b id="cloudUserLabel">—</b>
+        </div>
+        <button id="cloudMigrateBtn" class="btn secondary wide">Перенести локальные планы в облако</button>
+        <button id="cloudLogoutBtn" class="btn secondary wide">Выйти из облака</button>
+      </div>
+
+      <div id="cloudSyncInfo" class="hint">Сервер не настроен.</div>
+    </div>
   </section>
   <section class="panel">
     <h3>Помещение</h3>
@@ -128,6 +159,20 @@
       <label>Полок<input id="shelves" type="number" step="1"></label>
       <label>Проход между рядами, м<input id="aisle" type="number" step="0.1"></label>
       <label>Заполнение, %<input id="fillPct" type="number" step="1"></label>
+    </div>
+
+    <div class="wall-gap-box">
+      <div class="headrow">
+        <div>
+          <b>Боковые интервалы от стен</b>
+          <div class="hint">Отступ применяется слева и справа от зоны стеллажей.</div>
+        </div>
+        <button id="sideWallGapToggleBtn" type="button" class="gap-toggle on">ВКЛ</button>
+      </div>
+      <label id="sideWallGapWrap">Отступ слева / справа, м
+        <input id="sideWallGap" type="number" min="0" step="0.05">
+      </label>
+      <div id="sideWallGapStatus" class="hint"></div>
     </div>
   </section>
 
@@ -228,7 +273,7 @@
 <main class="main">
   <section class="hero">
     <div class="card"><span>Площадь 1 этажа</span><b id="mArea"></b></div>
-    <div class="card"><span>Площадь этажа</span><b id="mMezzArea"></b></div>
+    <div class="card"><span>Площадь хранения</span><b id="mStorageArea"></b></div>
     <div class="card"><span>Рабочая вместимость</span><b id="mCapacity"></b></div>
     <div class="card"><span>Макс. сквозной поток</span><b id="mThroughput"></b></div>
     <div class="card"><span>Камер</span><b id="mCams"></b></div>
@@ -309,6 +354,6 @@
 </main>
 </div>
 
-<script src="app.js?v=7.8"></script>
+<script src="app.js?v=8.1"></script>
 </body>
 </html>

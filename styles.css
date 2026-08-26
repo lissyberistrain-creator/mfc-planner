@@ -172,3 +172,40 @@ h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9
 @media(max-width:900px){
   .scaling-summary{grid-template-columns:1fr}
 }
+
+
+/* MFC Planner 8.1 — Cloud Workspace */
+.cloud-top-status{
+  align-self:center;padding:6px 9px;border-radius:999px;font-size:11px;font-weight:800;
+  border:1px solid rgba(255,255,255,.28);white-space:nowrap
+}
+.cloud-top-status.cloud{background:#277a46;color:#fff}
+.cloud-top-status.pending{background:#9c7225;color:#fff}
+.cloud-top-status.local{background:rgba(255,255,255,.13);color:#fff}
+
+.cloud-badge{
+  font-size:10px;font-weight:800;padding:4px 8px;border-radius:999px;border:1px solid
+}
+.cloud-badge.cloud{background:#e8f7ed;border-color:#b9dfc5;color:#246a39}
+.cloud-badge.pending{background:#fff4d9;border-color:#ead298;color:#86621b}
+.cloud-badge.local{background:#f2eef5;border-color:#ded5e4;color:#75677d}
+.cloud-box{
+  margin-top:10px;padding-top:10px;border-top:1px solid #ece4f1;display:grid;gap:8px
+}
+.cloud-box label{margin:0}
+.cloud-auth-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.cloud-user{background:#f8f4fb;border:1px solid #e8dcef;border-radius:10px;padding:9px;margin-bottom:7px}
+.cloud-user span{display:block;font-size:9px;color:#817587}
+.cloud-user b{display:block;margin-top:3px;color:#522d76;font-size:12px}
+
+.wall-gap-box{
+  margin-top:12px;padding:10px;border:1px solid #e8ddef;background:#fcfafd;border-radius:11px
+}
+.wall-gap-box .headrow{align-items:center;margin-bottom:8px}
+.gap-toggle{
+  min-width:62px;border:0;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer
+}
+.gap-toggle.on{background:#e9f7ee;color:#276c3b;border:1px solid #bfe2ca}
+.gap-toggle.off{background:#f3eef6;color:#766b7d;border:1px solid #ddd4e3}
+.disabled-field{opacity:.48}
+.hidden{display:none!important}

@@ -21,15 +21,16 @@ const defaults={
   roomL:20,roomW:10,roomH:3,avgSkuL:4.5,targetFlow:100000,simFlow:100000,layoutMode:'balanced',
   activeLevel:'ground',mezzanineL:20,mezzanineW:10,
   centralAisle:1.6,rackL:1.2,rackD:0.5,rackH:2.5,shelves:5,aisle:1.2,fillPct:95,
+  sideWallGapEnabled:true,sideWallGap:0.15,
   normAccept:2750,normPutaway:2750,normPick:1500,normShip:3500,
   opsPerShift:3,shiftsPerDay:2,paidHours:11,opRate:400,seniors:2,seniorSalary:90000,managers:1,managerSalary:130000,
   turnoverMode:'working',turnoverRate:2.65,staffingTargetUtil:85,scaleBaselineCapacity:0,scaleBaselineArea:0,
   cameraRange:3.4,coverageStep:0.8,zones:[],columns:[],objects:[],avgFlow:100000,maxFlow:120000,fixedPC:2,fixedTsd:3,fixedTablet:2,rent:300000,capex:2921881
 };
 
-let state=JSON.parse(localStorage.getItem('mfcPlannerV78')||'null');
+let state=JSON.parse(localStorage.getItem('mfcPlannerDraftV81')||'null');
 if(!state){
-  const previousKeys=['mfcPlannerV77','mfcPlannerV76','mfcPlannerV744','mfcPlannerV743','mfcPlannerV742','mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
+  const previousKeys=['mfcPlannerV78','mfcPlannerV77','mfcPlannerV76','mfcPlannerV744','mfcPlannerV743','mfcPlannerV742','mfcPlannerV69','mfcPlannerV68','mfcPlannerV67','mfcPlannerV66','mfcPlannerV65','mfcPlannerV64','mfcPlannerV63','mfcPlannerV62','mfcPlannerV61','mfcPlannerV5'];
   for(const key of previousKeys){
     try{
       const candidate=JSON.parse(localStorage.getItem(key)||'null');
@@ -44,7 +45,7 @@ for(const k in defaults){if(state[k]===undefined) state[k]=structuredClone(defau
 function sanitizeState(){
   const numericKeys=[
     'roomL','roomW','roomH','mezzanineL','mezzanineW','avgSkuL','targetFlow','simFlow','centralAisle',
-    'rackL','rackD','rackH','shelves','aisle','fillPct',
+    'rackL','rackD','rackH','shelves','aisle','fillPct','sideWallGap',
     'normAccept','normPutaway','normPick','normShip',
     'opsPerShift','shiftsPerDay','paidHours','opRate',
     'seniors','seniorSalary','managers','managerSalary',
@@ -60,6 +61,8 @@ function sanitizeState(){
       state[k]=v;
     }
   });
+  state.sideWallGapEnabled=state.sideWallGapEnabled!==false;
+  state.sideWallGap=Math.max(0,Number(state.sideWallGap)||0);
   if(!state.layoutMode) state.layoutMode=defaults.layoutMode;
   if(!['one','working','high','custom'].includes(state.turnoverMode)) state.turnoverMode='working';
   state.turnoverRate=Math.max(.1,Number(state.turnoverRate)||2.65);
@@ -161,7 +164,7 @@ migrateV69();
 let selected={kind:null,index:null,name:null};
 let mode='move', drag=null;
 
-function save(){localStorage.setItem('mfcPlannerV78',JSON.stringify(state));}
+function save(){localStorage.setItem('mfcPlannerDraftV81',JSON.stringify(state));}
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function pointInRect(p,r){return p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h;}
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
@@ -406,15 +409,15 @@ function rackBlockers(){
   return blockers;
 }
 function rackCandidateArea(){
-  // Вся внутренняя площадь помещения является кандидатом под хранение.
-  // Коридоры, WC, офис, приемка, отгрузка, ЦП и т.п. вырезаются
-  // через rackBlockers() по их ФАКТИЧЕСКОМУ текущему положению.
-  const margin=.15;
+  // Боковые интервалы (левая/правая стены) теперь управляются пользователем.
+  // Верх/низ сохраняют небольшой технический край модели 0.15 м.
+  const sideGap=state.sideWallGapEnabled?Math.max(0,Number(state.sideWallGap)||0):0;
+  const endGap=.15;
   return {
-    x:margin,
-    y:margin,
-    w:Math.max(.5,state.roomL-margin*2),
-    h:Math.max(.5,state.roomW-margin*2)
+    x:sideGap,
+    y:endGap,
+    w:Math.max(.5,state.roomL-sideGap*2),
+    h:Math.max(.5,state.roomW-endGap*2)
   };
 }
 function rackCellAllowed(rect, blockers){
@@ -1091,7 +1094,7 @@ function draw(){
   };
 
   if(state.activeLevel==='ground'){
-    $('layoutSummary').textContent=`1 этаж · ${fmt1(a.groundArea)} м² · улиц ${a.rp.streetCount||0} · секций ${a.rp.total} · стеллажи ${fmt1(a.rp.rackArea||0)} м² · свободный остаток ${fmt1(unusedRackableArea())} м²`;
+    $('layoutSummary').textContent=`1 этаж · ${fmt1(a.groundArea)} м² · улиц ${a.rp.streetCount||0} · секций ${a.rp.total} · стеллажи ${fmt1(a.rp.rackArea||0)} м² · свободный остаток ${fmt1(unusedRackableArea())} м² · боковые отступы ${state.sideWallGapEnabled?fmt1(state.sideWallGap)+' м':'выкл'}`;
   }else{
     const zones=(state.zones||[]).filter(z=>z.name!=='Хранение'&&onLevel(z,'mezzanine'));
     const process=zones.filter(z=>z.type==='process').reduce((s,z)=>s+netArea(z),0)
@@ -1190,7 +1193,7 @@ function renderTabs(){
   const a=analytics(),pm=a.pm,scale=a.scaling;
 
   $('mArea').textContent=fmt1(a.groundArea)+' м²';
-  if($('mMezzArea'))$('mMezzArea').textContent=fmt1(a.mezzanineArea)+' м²';
+  if($('mStorageArea'))$('mStorageArea').textContent=fmt1(a.rackUsedArea)+' м²';
   $('mCapacity').textContent=fmt(a.cap)+' ШК';
   $('mThroughput').textContent=fmt(pm.maxMonthly)+' ШК/мес';
   $('mCams').textContent=fmt(a.totalCams)+' шт.';
@@ -1360,8 +1363,40 @@ function switchLevel(level){
   renderAll();
 }
 
+
+function syncSideWallGapControls(){
+  const enabled=state.sideWallGapEnabled!==false;
+  const btn=$('sideWallGapToggleBtn');
+  const input=$('sideWallGap');
+  const wrap=$('sideWallGapWrap');
+  const status=$('sideWallGapStatus');
+
+  if(btn){
+    btn.textContent=enabled?'ВКЛ':'ВЫКЛ';
+    btn.classList.toggle('on',enabled);
+    btn.classList.toggle('off',!enabled);
+  }
+  if(input){
+    input.value=state.sideWallGap;
+    input.disabled=!enabled;
+  }
+  if(wrap)wrap.classList.toggle('disabled-field',!enabled);
+  if(status){
+    status.textContent=enabled
+      ? `Активно: ${fmt1(state.sideWallGap)} м слева + ${fmt1(state.sideWallGap)} м справа.`
+      : 'Отключено: стеллажная сетка может начинаться от боковых стен без модельного отступа.';
+  }
+}
+function toggleSideWallGap(){
+  state.sideWallGapEnabled=!state.sideWallGapEnabled;
+  optimizerAllCandidates=[];
+  optimizerVariants=[];
+  renderVariantSelector();
+  renderAll();
+}
 function renderAll(full=true){
   save();
+  syncSideWallGapControls();
   renderLevelControls();
   if(full){renderColumns();renderSelected()}
   draw();renderEmu();renderTabs();
@@ -1504,17 +1539,28 @@ function addTemplate(template){
   }
   renderAll();
 }
-const PROJECTS_KEY='mfcPlannerProjectsV78';
-const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV78';
-let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||localStorage.getItem('mfcPlannerCurrentProjectV77')||localStorage.getItem('mfcPlannerCurrentProjectV76')||localStorage.getItem('mfcPlannerCurrentProjectV744')||localStorage.getItem('mfcPlannerCurrentProjectV743')||'';
+
+const PROJECTS_KEY='mfcPlannerProjectsV81';
+const CURRENT_PROJECT_KEY='mfcPlannerCurrentProjectV81';
+const CLOUD_API_KEY='mfcPlannerCloudApiV81';
+const CLOUD_TOKEN_KEY='mfcPlannerCloudTokenV81';
+
+let currentProjectId=localStorage.getItem(CURRENT_PROJECT_KEY)||'';
+let cloudApiBase=(localStorage.getItem(CLOUD_API_KEY)||'').replace(/\/+$/,'');
+let cloudToken=localStorage.getItem(CLOUD_TOKEN_KEY)||'';
+let cloudUser=null;
+let cloudProjects=[];
+let cloudLastSync=null;
+let cloudAutosaveBusy=false;
 
 function escapeHtml(s){return String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
+
 function readProjects(){
   try{
     let p=JSON.parse(localStorage.getItem(PROJECTS_KEY)||'[]');
-    if(!Array.isArray(p)) p=[];
+    if(!Array.isArray(p))p=[];
     if(!p.length){
-      const legacyKeys=['mfcPlannerProjectsV77','mfcPlannerProjectsV76','mfcPlannerProjectsV744','mfcPlannerProjectsV743'];
+      const legacyKeys=['mfcPlannerProjectsV78','mfcPlannerProjectsV77','mfcPlannerProjectsV76','mfcPlannerProjectsV744','mfcPlannerProjectsV743'];
       for(const key of legacyKeys){
         const legacy=JSON.parse(localStorage.getItem(key)||'[]');
         if(Array.isArray(legacy)&&legacy.length){
@@ -1528,22 +1574,181 @@ function readProjects(){
   }catch(e){return []}
 }
 function writeProjects(projects){localStorage.setItem(PROJECTS_KEY,JSON.stringify(projects));}
-function projectSnapshot(){
-  return JSON.parse(JSON.stringify(state));
+function projectSnapshot(){return JSON.parse(JSON.stringify(state));}
+function cloudConnected(){return !!(cloudApiBase&&cloudToken&&cloudUser);}
+
+function currentProjectList(){
+  return cloudConnected()?cloudProjects:readProjects();
 }
 function projectNameById(id){
-  const p=readProjects().find(x=>x.id===id);
+  const p=currentProjectList().find(x=>String(x.id)===String(id));
   return p?p.name:'Черновик';
 }
+
+async function cloudFetch(path,options={}){
+  if(!cloudApiBase)throw new Error('Cloud API не настроен');
+  const headers={'Content-Type':'application/json',...(options.headers||{})};
+  if(cloudToken)headers.Authorization='Bearer '+cloudToken;
+
+  const res=await fetch(cloudApiBase+path,{...options,headers});
+  let data=null;
+  try{data=await res.json()}catch(e){data=null}
+  if(!res.ok){
+    const message=data?.detail||data?.message||`HTTP ${res.status}`;
+    if(res.status===401){
+      cloudToken='';
+      cloudUser=null;
+      localStorage.removeItem(CLOUD_TOKEN_KEY);
+      renderCloudStatus();
+    }
+    throw new Error(message);
+  }
+  return data;
+}
+
+function setCloudSyncMessage(text){
+  if($('cloudSyncInfo'))$('cloudSyncInfo').textContent=text;
+}
+
+function renderCloudStatus(){
+  const connected=cloudConnected();
+  const configured=!!cloudApiBase;
+  const badge=$('cloudStatusBadge');
+  const top=$('cloudTopStatus');
+
+  if(badge){
+    badge.className='cloud-badge '+(connected?'cloud':configured?'pending':'local');
+    badge.textContent=connected?'Облако':configured?'API задан':'Локально';
+  }
+  if(top){
+    top.className='cloud-top-status '+(connected?'cloud':configured?'pending':'local');
+    top.textContent=connected?'● облако':'● локально';
+  }
+
+  if($('cloudApiBase'))$('cloudApiBase').value=cloudApiBase;
+  if($('cloudLoggedOut'))$('cloudLoggedOut').classList.toggle('hidden',connected);
+  if($('cloudLoggedIn'))$('cloudLoggedIn').classList.toggle('hidden',!connected);
+  if($('cloudUserLabel'))$('cloudUserLabel').textContent=cloudUser?`${cloudUser.display_name||cloudUser.email} · ${cloudUser.email}`:'—';
+
+  if(connected){
+    const host=(()=>{
+      try{return new URL(cloudApiBase).host}catch(e){return cloudApiBase}
+    })();
+    const sync=cloudLastSync?` · синхр. ${cloudLastSync.toLocaleTimeString('ru-RU')}`:'';
+    setCloudSyncMessage(`☁ Данные планов сохраняются на сервере ${host}${sync}. Локально остаётся только резервный черновик.`);
+  }else if(configured){
+    setCloudSyncMessage('API указан, но вход в облачный аккаунт не выполнен.');
+  }else{
+    setCloudSyncMessage('Сервер не настроен. Сохранённые планы работают локально.');
+  }
+}
+
+async function cloudCheck(){
+  cloudApiBase=($('cloudApiBase')?.value||'').trim().replace(/\/+$/,'');
+  if(!cloudApiBase)return alert('Укажи адрес Cloud API.');
+  localStorage.setItem(CLOUD_API_KEY,cloudApiBase);
+  renderCloudStatus();
+  try{
+    const h=await cloudFetch('/health');
+    setCloudSyncMessage(`Сервер отвечает: ${h.status||'ok'}. Можно войти или зарегистрироваться.`);
+  }catch(e){
+    setCloudSyncMessage('Ошибка подключения: '+e.message);
+  }
+}
+
+async function cloudRegister(){
+  cloudApiBase=($('cloudApiBase')?.value||cloudApiBase).trim().replace(/\/+$/,'');
+  localStorage.setItem(CLOUD_API_KEY,cloudApiBase);
+  const email=($('cloudEmail')?.value||'').trim();
+  const password=$('cloudPassword')?.value||'';
+  if(!email||password.length<8)return alert('Укажи email и пароль минимум 8 символов.');
+  try{
+    const data=await cloudFetch('/auth/register',{
+      method:'POST',
+      body:JSON.stringify({email,password,display_name:email.split('@')[0]})
+    });
+    cloudToken=data.token;
+    cloudUser=data.user;
+    localStorage.setItem(CLOUD_TOKEN_KEY,cloudToken);
+    await cloudRefreshProjects();
+    renderCloudStatus();
+    renderProjectSelector();
+  }catch(e){alert('Регистрация: '+e.message)}
+}
+
+async function cloudLogin(){
+  cloudApiBase=($('cloudApiBase')?.value||cloudApiBase).trim().replace(/\/+$/,'');
+  localStorage.setItem(CLOUD_API_KEY,cloudApiBase);
+  const email=($('cloudEmail')?.value||'').trim();
+  const password=$('cloudPassword')?.value||'';
+  if(!email||!password)return alert('Укажи email и пароль.');
+  try{
+    const data=await cloudFetch('/auth/login',{
+      method:'POST',
+      body:JSON.stringify({email,password})
+    });
+    cloudToken=data.token;
+    cloudUser=data.user;
+    localStorage.setItem(CLOUD_TOKEN_KEY,cloudToken);
+    currentProjectId='';
+    localStorage.removeItem(CURRENT_PROJECT_KEY);
+    await cloudRefreshProjects();
+    renderCloudStatus();
+    renderProjectSelector();
+  }catch(e){alert('Вход: '+e.message)}
+}
+
+function cloudLogout(){
+  cloudToken='';
+  cloudUser=null;
+  cloudProjects=[];
+  currentProjectId='';
+  localStorage.removeItem(CLOUD_TOKEN_KEY);
+  localStorage.removeItem(CURRENT_PROJECT_KEY);
+  renderCloudStatus();
+  renderProjectSelector();
+}
+
+async function cloudRestoreSession(){
+  if(!cloudApiBase||!cloudToken){renderCloudStatus();return}
+  try{
+    cloudUser=await cloudFetch('/auth/me');
+    await cloudRefreshProjects();
+  }catch(e){
+    cloudToken='';
+    cloudUser=null;
+    localStorage.removeItem(CLOUD_TOKEN_KEY);
+  }
+  renderCloudStatus();
+  renderProjectSelector();
+}
+
+async function cloudRefreshProjects(){
+  if(!cloudToken)return;
+  cloudProjects=await cloudFetch('/projects');
+  cloudProjects=(cloudProjects||[]).map(p=>({
+    ...p,
+    id:String(p.id),
+    updatedAt:p.updated_at?new Date(p.updated_at).getTime():Date.now()
+  }));
+  cloudLastSync=new Date();
+  renderCloudStatus();
+}
+
 function renderProjectSelector(){
   const sel=$('projectSelect');
   if(!sel)return;
-  const projects=readProjects().sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
-  sel.innerHTML='<option value="">Мои планы ('+projects.length+')</option>'+projects.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
-  if(currentProjectId&&projects.some(p=>p.id===currentProjectId))sel.value=currentProjectId;
+  const projects=[...currentProjectList()].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+  const prefix=cloudConnected()?'☁ Мои облачные планы':'Мои локальные планы';
+  sel.innerHTML=`<option value="">${prefix} (${projects.length})</option>`+
+    projects.map(p=>`<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`).join('');
+  if(currentProjectId&&projects.some(p=>String(p.id)===String(currentProjectId)))sel.value=String(currentProjectId);
   if($('currentProjectName'))$('currentProjectName').textContent=projectNameById(currentProjectId);
 }
-function saveNamedProject(forceNew=false){
+
+async function saveNamedProject(forceNew=false){
+  if(cloudConnected())return saveCloudProject(forceNew);
+
   const projects=readProjects();
   const current=projects.find(p=>p.id===currentProjectId);
   const defaultName=forceNew
@@ -1555,67 +1760,144 @@ function saveNamedProject(forceNew=false){
   const clean=name.trim();
   const now=Date.now();
 
-  // Если у текущего плана оставили то же имя, просто обновляем его.
-  if(current && !forceNew && clean.toLocaleLowerCase('ru-RU')===current.name.toLocaleLowerCase('ru-RU')){
-    current.state=projectSnapshot();
-    current.updatedAt=now;
+  if(current&&!forceNew&&clean.toLocaleLowerCase('ru-RU')===current.name.toLocaleLowerCase('ru-RU')){
+    current.state=projectSnapshot();current.updatedAt=now;
   }else{
-    // Любое другое имя создаёт отдельный план. Так можно хранить сколько угодно вариантов.
-    const sameName=projects.find(p=>p.name.toLocaleLowerCase('ru-RU')===clean.toLocaleLowerCase('ru-RU'));
-    if(sameName && sameName.id!==currentProjectId){
-      const overwrite=confirm(`План «${clean}» уже существует. Обновить его?\n\nОК — обновить существующий\nОтмена — создать отдельную копию`);
-      if(overwrite){
-        sameName.state=projectSnapshot();
-        sameName.updatedAt=now;
-        currentProjectId=sameName.id;
-      }else{
-        const project={id:'p_'+now+'_'+Math.random().toString(36).slice(2,8),name:clean+' — '+new Date(now).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}),state:projectSnapshot(),createdAt:now,updatedAt:now};
-        projects.push(project);
-        currentProjectId=project.id;
-      }
-    }else{
-      const project={id:'p_'+now+'_'+Math.random().toString(36).slice(2,8),name:clean,state:projectSnapshot(),createdAt:now,updatedAt:now};
-      projects.push(project);
-      currentProjectId=project.id;
-    }
+    const project={id:'p_'+now+'_'+Math.random().toString(36).slice(2,8),name:clean,state:projectSnapshot(),createdAt:now,updatedAt:now};
+    projects.push(project);currentProjectId=project.id;
   }
-
   writeProjects(projects);
   localStorage.setItem(CURRENT_PROJECT_KEY,currentProjectId);
   renderProjectSelector();
-  if($('projectSaveStatus'))$('projectSaveStatus').textContent='Сохранено планов: '+projects.length+' · '+new Date(now).toLocaleString('ru-RU');
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent='Локально сохранено планов: '+projects.length;
 }
-function openProject(id){
+
+async function saveCloudProject(forceNew=false){
+  const current=cloudProjects.find(p=>String(p.id)===String(currentProjectId));
+  const defaultName=forceNew
+    ? (current?current.name+' — копия':`MFC ${fmt1(state.roomL*state.roomW)} м² — вариант`)
+    : (current?current.name:`MFC ${fmt1(state.roomL*state.roomW)} м²`);
+  const name=prompt(forceNew?'Название нового облачного плана:':'Название облачного плана:',defaultName);
+  if(!name||!name.trim())return;
+  try{
+    let item;
+    if(current&&!forceNew){
+      item=await cloudFetch(`/projects/${current.id}`,{
+        method:'PUT',
+        body:JSON.stringify({name:name.trim(),layout:projectSnapshot()})
+      });
+    }else{
+      item=await cloudFetch('/projects',{
+        method:'POST',
+        body:JSON.stringify({name:name.trim(),layout:projectSnapshot()})
+      });
+    }
+    currentProjectId=String(item.id);
+    localStorage.setItem(CURRENT_PROJECT_KEY,currentProjectId);
+    cloudLastSync=new Date();
+    await cloudRefreshProjects();
+    renderProjectSelector();
+    if($('projectSaveStatus'))$('projectSaveStatus').textContent='☁ Сохранено в облако: '+new Date().toLocaleString('ru-RU');
+  }catch(e){alert('Облачное сохранение: '+e.message)}
+}
+
+async function openProject(id){
   if(!id)return;
-  const p=readProjects().find(x=>x.id===id);
+  let p=null;
+  if(cloudConnected()){
+    try{
+      p=await cloudFetch(`/projects/${id}`);
+      p={...p,state:p.layout};
+    }catch(e){return alert('Не удалось открыть облачный план: '+e.message)}
+  }else{
+    p=readProjects().find(x=>String(x.id)===String(id));
+  }
   if(!p||!p.state)return;
   state=Object.assign(structuredClone(defaults),JSON.parse(JSON.stringify(p.state)));
-  sanitizeState(); migrateSmartZones(); migrateV69();
-  currentProjectId=id;
-  localStorage.setItem(CURRENT_PROJECT_KEY,id);
+  sanitizeState();migrateSmartZones();migrateV69();
+  currentProjectId=String(id);
+  localStorage.setItem(CURRENT_PROJECT_KEY,currentProjectId);
   inputIds.forEach(k=>{if($(k))$(k).value=state[k]});
   if($('layoutMode'))$('layoutMode').value=state.layoutMode;
   if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;
   selected={kind:null,index:null};
-  save(); renderProjectSelector(); renderAll();
+  save();renderProjectSelector();renderAll();
 }
-function deleteCurrentProject(){
+
+async function deleteCurrentProject(){
   if(!currentProjectId)return alert('Сначала выбери сохранённый план.');
-  const projects=readProjects();
-  const p=projects.find(x=>x.id===currentProjectId);
+  const p=currentProjectList().find(x=>String(x.id)===String(currentProjectId));
   if(!p)return;
   if(!confirm(`Удалить план «${p.name}»?`))return;
-  writeProjects(projects.filter(x=>x.id!==currentProjectId));
-  currentProjectId=''; localStorage.removeItem(CURRENT_PROJECT_KEY);
+
+  if(cloudConnected()){
+    try{
+      await cloudFetch(`/projects/${currentProjectId}`,{method:'DELETE'});
+      currentProjectId='';
+      localStorage.removeItem(CURRENT_PROJECT_KEY);
+      await cloudRefreshProjects();
+    }catch(e){return alert('Удаление из облака: '+e.message)}
+  }else{
+    writeProjects(readProjects().filter(x=>String(x.id)!==String(currentProjectId)));
+    currentProjectId='';
+    localStorage.removeItem(CURRENT_PROJECT_KEY);
+  }
   renderProjectSelector();
 }
-function autosaveCurrentProject(){
+
+async function autosaveCurrentProject(){
   if(!currentProjectId)return;
+
+  if(cloudConnected()){
+    if(cloudAutosaveBusy)return;
+    const current=cloudProjects.find(p=>String(p.id)===String(currentProjectId));
+    if(!current)return;
+    cloudAutosaveBusy=true;
+    try{
+      await cloudFetch(`/projects/${currentProjectId}`,{
+        method:'PUT',
+        body:JSON.stringify({name:current.name,layout:projectSnapshot()})
+      });
+      cloudLastSync=new Date();
+      renderCloudStatus();
+      if($('projectSaveStatus'))$('projectSaveStatus').textContent='☁ Автосохранение на сервер: '+cloudLastSync.toLocaleTimeString('ru-RU');
+    }catch(e){
+      if($('projectSaveStatus'))$('projectSaveStatus').textContent='⚠ Облачное автосохранение не выполнено: '+e.message;
+    }finally{cloudAutosaveBusy=false}
+    return;
+  }
+
   const projects=readProjects();
-  const p=projects.find(x=>x.id===currentProjectId);
+  const p=projects.find(x=>String(x.id)===String(currentProjectId));
   if(!p)return;
-  p.state=projectSnapshot(); p.updatedAt=Date.now(); writeProjects(projects);
-  if($('projectSaveStatus'))$('projectSaveStatus').textContent='Автосохранение: '+new Date(p.updatedAt).toLocaleTimeString('ru-RU');
+  p.state=projectSnapshot();p.updatedAt=Date.now();writeProjects(projects);
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent='Локальное автосохранение: '+new Date(p.updatedAt).toLocaleTimeString('ru-RU');
+}
+
+async function migrateLocalProjectsToCloud(){
+  if(!cloudConnected())return alert('Сначала войди в облачный аккаунт.');
+  const locals=readProjects();
+  if(!locals.length)return alert('Локальных сохранённых планов нет.');
+  if(!confirm(`Перенести ${locals.length} локальных планов в облако? Локальные копии останутся.`))return;
+
+  let ok=0,failed=0;
+  for(const p of locals){
+    try{
+      await cloudFetch('/projects',{
+        method:'POST',
+        body:JSON.stringify({name:p.name||'Локальный план',layout:p.state||{}})
+      });
+      ok++;
+    }catch(e){failed++}
+  }
+  await cloudRefreshProjects();
+  renderProjectSelector();
+  alert(`Перенос завершён. В облаке создано: ${ok}. Ошибок: ${failed}.`);
+}
+
+async function initCloudWorkspace(){
+  renderCloudStatus();
+  await cloudRestoreSession();
 }
 
 
@@ -2469,7 +2751,7 @@ function runValidation(){
 }
 
 
-const inputIds=['roomL','roomW','roomH','mezzanineL','mezzanineW','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','turnoverRate','staffingTargetUtil','cameraRange','coverageStep'];
+const inputIds=['roomL','roomW','roomH','mezzanineL','mezzanineW','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','turnoverRate','staffingTargetUtil','cameraRange','coverageStep','sideWallGap'];
 inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id]=parseFloat(el.value)||0;if(id==='centralAisle'){
   state.centralAisle=clamp(state.centralAisle,1.2,2.6);
   const c=getZone('Центральный проход');
@@ -2523,14 +2805,26 @@ $('applyVariantBtn').onclick=applySelectedVariant;
 $('fillStorageBtn').onclick=fillStorageToMaximum;
 $('validateBtn').onclick=runValidation;
 $('showValidationOverlay').onchange=()=>draw();
+$('sideWallGapToggleBtn').onclick=toggleSideWallGap;
+$('cloudCheckBtn').onclick=cloudCheck;
+$('cloudLoginBtn').onclick=cloudLogin;
+$('cloudRegisterBtn').onclick=cloudRegister;
+$('cloudLogoutBtn').onclick=cloudLogout;
+$('cloudMigrateBtn').onclick=migrateLocalProjectsToCloud;
+$('cloudApiBase').onchange=()=>{
+  cloudApiBase=$('cloudApiBase').value.trim().replace(/\/+$/,'');
+  localStorage.setItem(CLOUD_API_KEY,cloudApiBase);
+  renderCloudStatus();
+};
 $('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();migrateV69();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>{if($(id))$(id).value=state[id]});if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderProjectSelector();renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v7.8.json';a.click();URL.revokeObjectURL(a.href)};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v8.1.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));sanitizeState();migrateSmartZones();migrateV69();selected={kind:null};inputIds.forEach(id=>{if($(id))$(id).value=state[id]});$('layoutMode').value=state.layoutMode;if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
 
 renderProjectSelector();
 renderVariantSelector();
+initCloudWorkspace();
 if(currentProjectId){ const pp=readProjects().find(x=>x.id===currentProjectId); if(pp&&pp.state) openProject(currentProjectId); }
 setInterval(autosaveCurrentProject,15000);
 renderAll();
