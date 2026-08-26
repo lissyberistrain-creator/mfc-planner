@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 8.2</title>
-  <link rel="stylesheet" href="styles.css?v=8.2">
+  <title>MFC Planner 8.3</title>
+  <link rel="stylesheet" href="styles.css?v=8.3">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">8.2</span></div>
+    <div class="brand">MFC Planner <span class="ver">8.3</span></div>
     <div class="sub">Интерактивный конструктор: облачные проекты, хранение, штат, этажи и оптимизация</div>
   </div>
   <div class="actions">
@@ -75,16 +75,25 @@
   </section>
 
   <section class="panel level-panel">
-    <div class="headrow"><h3>Уровни 7.7</h3><span id="activeLevelBadge" class="level-badge">1 этаж</span></div>
+    <div class="headrow"><h3>Этажи</h3><span id="activeLevelBadge" class="level-badge">Этаж 1</span></div>
     <div class="level-switch">
-      <button type="button" class="level-btn active" data-level-switch="ground">1 этаж</button>
-      <button type="button" class="level-btn" data-level-switch="mezzanine">Этаж</button>
+      <button type="button" class="level-btn active" data-level-switch="ground">Этаж 1</button>
+      <button type="button" class="level-btn" data-level-switch="mezzanine">Этаж 2</button>
     </div>
-    <div class="grid2 level-dims">
-      <label>Этаж, длина<input id="mezzanineL" type="number" step="0.1"></label>
-      <label>Этаж, ширина<input id="mezzanineW" type="number" step="0.1"></label>
+    <div class="floor-actions">
+      <button id="addFloorBtn" class="btn primary wide" type="button">+ Добавить этаж</button>
+      <button id="removeFloorBtn" class="btn secondary wide" type="button">Удалить этаж 2</button>
     </div>
-    <div class="hint">Стеллажная вместимость считается по 1 этажу. Зоны этажа участвуют в процессах, но не блокируют хранение внизу.</div>
+    <div id="floor2Settings" class="floor2-settings">
+      <label>Назначение этажа 2
+        <select id="floor2Mode"><option value="process">Только процессы</option><option value="storage">Только хранение</option><option value="mixed">Хранение + процессы</option></select>
+      </label>
+      <div class="grid2 level-dims">
+        <label>Этаж 2, длина<input id="mezzanineL" type="number" step="0.1"></label>
+        <label>Этаж 2, ширина<input id="mezzanineW" type="number" step="0.1"></label>
+      </div>
+    </div>
+    <div class="hint">Этаж 2 добавляется отдельно. В режиме «Только процессы» он не увеличивает вместимость ШК.</div>
   </section>
 
   <section class="panel emphasis">
@@ -148,6 +157,14 @@
     <div id="validationNote" class="hint">
       Проверка планировочная. Она не подтверждает соответствие пожарным, строительным или охранным нормативам.
     </div>
+  </section>
+
+  <section class="panel reports-panel">
+    <div class="headrow"><h3>Отчёты</h3><span class="badge-lite">8.3</span></div>
+    <button id="exportPdfBtn" class="btn primary wide" type="button">PDF отчёт</button>
+    <button id="exportExcelBtn" class="btn secondary wide" type="button">Excel расчёты</button>
+    <button id="exportPngBtn" class="btn secondary wide" type="button">PNG текущего плана</button>
+    <div class="hint">PDF открывает системную печать — выбери «Сохранить как PDF». Excel содержит отдельные листы расчётов.</div>
   </section>
 
   <section class="panel">
@@ -302,10 +319,10 @@
     </div>
     <div class="plan-levelbar">
       <div class="level-switch">
-        <button type="button" class="level-btn active" data-level-switch="ground">1 этаж</button>
-        <button type="button" class="level-btn" data-level-switch="mezzanine">Этаж</button>
+        <button type="button" class="level-btn active" data-level-switch="ground">Этаж 1</button>
+        <button type="button" class="level-btn" data-level-switch="mezzanine">Этаж 2</button>
       </div>
-      <b id="planLevelBadge">1 этаж</b>
+      <b id="planLevelBadge">Этаж 1</b>
     </div>
     <div class="toolbar">
       <span>Режим:</span>
@@ -338,7 +355,7 @@
       <button class="tab" data-tab="staff">Персонал</button>
       <button class="tab" data-tab="video">Камеры</button>
       <button class="tab" data-tab="equip">Оборудование</button>
-      <button class="tab" data-tab="levels">Уровни</button>
+      <button class="tab" data-tab="levels">Этажи</button>
       <button class="tab" data-tab="analytics">Аналитика</button>
       <button class="tab" data-tab="checks">Проверки</button>
     </div>
@@ -355,6 +372,6 @@
 </main>
 </div>
 
-<script src="app.js?v=8.2"></script>
+<script src="app.js?v=8.3"></script>
 </body>
 </html>

@@ -225,3 +225,6 @@ h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9
   fill:#ffe1ad;
   stroke:#cf8e28;
 }
+
+/* 8.3 Floors + Reports */
+.floor-actions{display:grid;gap:7px;margin:8px 0}.floor2-settings{display:grid;gap:7px;margin-top:8px;padding-top:8px;border-top:1px solid #eadff0}.reports-panel{border-color:#dac9e6}.reports-panel .btn{margin-top:6px}

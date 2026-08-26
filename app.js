@@ -19,7 +19,7 @@ const names={accept:'Приёмка',putaway:'Раскладка',pick:'Сбор
 
 const defaults={
   roomL:20,roomW:10,roomH:3,avgSkuL:4.5,targetFlow:100000,simFlow:100000,layoutMode:'balanced',
-  activeLevel:'ground',mezzanineL:20,mezzanineW:10,
+  activeLevel:'ground',mezzanineL:20,mezzanineW:10,floor2Enabled:false,floor2Mode:'process',floor2MigrationDone:false,
   centralAisle:1.6,rackL:1.2,rackD:0.5,rackH:2.5,shelves:5,aisle:1.2,fillPct:95,
   sideWallGapEnabled:true,sideWallGap:0.15,
   normAccept:2750,normPutaway:2750,normPick:1500,normShip:3500,
@@ -68,6 +68,10 @@ function sanitizeState(){
   state.turnoverRate=Math.max(.1,Number(state.turnoverRate)||2.65);
   state.staffingTargetUtil=clamp(Number(state.staffingTargetUtil)||85,50,100);
   if(!['ground','mezzanine'].includes(state.activeLevel)) state.activeLevel='ground';
+  if(state.floor2MigrationDone!==true){const legacy=[...(state.zones||[]),...(state.objects||[]),...(state.columns||[])].some(o=>o&&o.level==='mezzanine');if(legacy)state.floor2Enabled=true;state.floor2MigrationDone=true;}
+  state.floor2Enabled=state.floor2Enabled===true;
+  if(!['process','storage','mixed'].includes(state.floor2Mode))state.floor2Mode='process';
+  if(!state.floor2Enabled&&state.activeLevel==='mezzanine')state.activeLevel='ground';
   state.mezzanineL=Math.max(2,Number(state.mezzanineL)||state.roomL||20);
   state.mezzanineW=Math.max(2,Number(state.mezzanineW)||state.roomW||10);
   if(!Array.isArray(state.zones)) state.zones=[];
@@ -90,7 +94,7 @@ function levelDims(level=state.activeLevel){
     : {L:state.roomL,W:state.roomW};
 }
 function levelTitle(level=state.activeLevel){
-  return level==='mezzanine'?'Этаж':'1 этаж';
+  return level==='mezzanine'?'Этаж 2':'Этаж 1';
 }
 function entityBounds(o){
   return levelDims(entityLevel(o)==='both'?state.activeLevel:entityLevel(o));
@@ -1726,13 +1730,13 @@ function addTemplate(template){
     const existing=(state.zones||[]).find(z=>z.name==='Сборка');
     if(existing){
       selected={kind:'zone',index:state.zones.indexOf(existing)};
-      state.activeLevel='mezzanine';
+      state.floor2Enabled=true;state.activeLevel='mezzanine';
       renderAll();
       return;
     }
     state.zones.push(o);
     selected={kind:'zone',index:state.zones.length-1};
-    state.activeLevel='mezzanine';
+    state.floor2Enabled=true;state.activeLevel='mezzanine';
   }else{
     state.objects.push(o);
     selected={kind:'object',index:state.objects.length-1};
@@ -2960,6 +2964,100 @@ function runValidation(){
 }
 
 
+
+// ============================================================
+// MFC Planner 8.3 — Floors + Reports
+// ============================================================
+function floor2HasStorage(){return state.floor2Enabled&&(state.floor2Mode==='storage'||state.floor2Mode==='mixed');}
+function floor2HasProcesses(){return state.floor2Enabled&&(state.floor2Mode==='process'||state.floor2Mode==='mixed');}
+function emptyRackPlan83(){return {orientation:'horizontal',total:0,accessibleSections:0,rejectedSections:0,racks:[],aisles:[],streets:[],streetCount:0,aisleCount:0,deadEndAisles:0,streetWidth:0,rackArea:0};}
+function rackPlanForLevel83(level){
+  if(level==='ground')return rackPlan();
+  if(level!=='mezzanine'||!floor2HasStorage())return emptyRackPlan83();
+  ensureFloor2StorageAccess83();
+  const oldL=state.roomL,oldW=state.roomW,oldA=state.activeLevel;
+  const all=[...(state.zones||[]),...(state.objects||[]),...(state.columns||[])];const levels=all.map(o=>o.level);
+  try{
+    state.roomL=state.mezzanineL;state.roomW=state.mezzanineW;state.activeLevel='ground';
+    all.forEach(o=>{if(o.level==='mezzanine'||o.level==='both')o.level='ground';else if(o.level==='ground')o.level='__floor1_hidden__';});
+    return freeRackPlan();
+  }finally{all.forEach((o,i)=>o.level=levels[i]);state.roomL=oldL;state.roomW=oldW;state.activeLevel=oldA;}
+}
+const analytics82=analytics;
+analytics=function(){
+  const a=analytics82();
+  const rp2=floor2HasStorage()?rackPlanForLevel83('mezzanine'):emptyRackPlan83();
+  const totalSections=(a.rp?.total||0)+(rp2.total||0);
+  const vol=totalSections*state.rackL*state.rackD*state.rackH;
+  const cap100=vol*1000/Math.max(.1,Number(state.avgSkuL)||.1);const cap=cap100*state.fillPct/100;
+  const floor2Area=state.floor2Enabled?state.mezzanineL*state.mezzanineW:0;
+  const scaling=staffingScaleModel(cap,a.groundArea+floor2Area);
+  const rackArea=(a.rp?.rackArea||0)+(rp2.rackArea||0);
+  return {...a,rp2,totalSections,totalStreets:(a.rp?.streetCount||0)+(rp2.streetCount||0),totalAisles:(a.rp?.aisleCount||0)+(rp2.aisleCount||0),vol,cap100,cap,scaling,mezzanineArea:floor2Area,totalOperationalArea:a.groundArea+floor2Area,rackUsedArea:rackArea,rackFootprint:rackArea,groundRackArea:a.rp?.rackArea||0,floor2RackArea:rp2.rackArea||0};
+};
+const draw82=draw;
+draw=function(){
+  draw82();
+  if(state.activeLevel!=='mezzanine'||!floor2HasStorage())return;
+  const svg=$('plan'),plan=rackPlanForLevel83('mezzanine'),dims=levelDims('mezzanine');
+  const W=940,H=520,sc=Math.min(W/dims.L,H/dims.W),ox=(1000-dims.L*sc)/2,oy=(590-dims.W*sc)/2,ns='http://www.w3.org/2000/svg';
+  const before=svg.querySelector('.obj')||null;
+  const add=(attrs,cls)=>{const e=document.createElementNS(ns,'rect');for(const k in attrs)e.setAttribute(k,attrs[k]);e.setAttribute('class',cls);svg.insertBefore(e,before);};
+  (plan.aisles||[]).forEach(ai=>add({x:ox+ai.x*sc,y:oy+ai.y*sc,width:Math.max(2,ai.w*sc),height:Math.max(2,ai.h*sc)},ai.deadEnd?'workingAisle deadEndAisle':'workingAisle'));
+  (plan.racks||[]).forEach(r=>add({x:ox+r.x*sc+1,y:oy+r.y*sc+1,width:Math.max(2,r.w*sc-2),height:Math.max(2,r.h*sc-2)},'rack'));
+};
+const renderTabs82=renderTabs;
+renderTabs=function(){
+  renderTabs82();const a=analytics();
+  if($('mStorageArea'))$('mStorageArea').textContent=fmt1(a.rackUsedArea)+' м²';
+  if($('mCapacity'))$('mCapacity').textContent=fmt(a.cap)+' ШК';
+  if($('mScaledFlow'))$('mScaledFlow').textContent=fmt(a.scaling.plannedFlow)+' ШК/мес';
+  if($('mAddStaff'))$('mAddStaff').textContent=a.scaling.addedOperatorPositions?`+${fmt(a.scaling.addedOperatorPositions)} чел.`:'0';
+  if(state.activeLevel==='mezzanine')$('layoutSummary').textContent=`Этаж 2 · ${fmt1(a.mezzanineArea)} м² · ${state.floor2Mode==='process'?'только процессы':state.floor2Mode==='storage'?'хранение':'смешанный'} · улиц ${a.rp2.streetCount||0} · секций ${a.rp2.total||0} · стеллажи ${fmt1(a.rp2.rackArea||0)} м²`;
+  if($('tab-levels')){
+    const cap1=(a.rp.total||0)*state.rackL*state.rackD*state.rackH*1000/Math.max(.1,state.avgSkuL)*state.fillPct/100;
+    const cap2=(a.rp2.total||0)*state.rackL*state.rackD*state.rackH*1000/Math.max(.1,state.avgSkuL)*state.fillPct/100;
+    $('tab-levels').innerHTML=`<div class="cards3">${metric('Этаж 1',fmt1(a.groundArea)+' м²',`${fmt(a.rp.total)} секций`)}${metric('Этаж 2',state.floor2Enabled?fmt1(a.mezzanineArea)+' м²':'не добавлен',state.floor2Enabled?(state.floor2Mode==='process'?'процессы':state.floor2Mode==='storage'?'хранение':'смешанный'):'добавляется отдельно')}${metric('Итого хранение',fmt1(a.rackUsedArea)+' м²',fmt(a.cap)+' ШК')}</div><table class="tbl"><tr><th>Этаж</th><th>Назначение</th><th>Секции</th><th>Вместимость</th></tr><tr><td>Этаж 1</td><td>смешанный</td><td>${fmt(a.rp.total)}</td><td>${fmt(cap1)} ШК</td></tr>${state.floor2Enabled?`<tr><td>Этаж 2</td><td>${state.floor2Mode==='process'?'процессы':state.floor2Mode==='storage'?'хранение':'смешанный'}</td><td>${fmt(a.rp2.total)}</td><td>${fmt(cap2)} ШК</td></tr>`:''}<tr><td><b>Итого</b></td><td></td><td><b>${fmt(a.totalSections)}</b></td><td><b>${fmt(a.cap)} ШК</b></td></tr></table>`;
+  }
+};
+const renderLevelControls82=renderLevelControls;
+renderLevelControls=function(){
+  renderLevelControls82();
+  document.querySelectorAll('[data-level-switch="mezzanine"]').forEach(b=>b.classList.toggle('hidden',!state.floor2Enabled));
+  if($('floor2Settings'))$('floor2Settings').classList.toggle('hidden',!state.floor2Enabled);
+  if($('addFloorBtn'))$('addFloorBtn').classList.toggle('hidden',state.floor2Enabled);
+  if($('removeFloorBtn'))$('removeFloorBtn').classList.toggle('hidden',!state.floor2Enabled);
+  if($('floor2Mode'))$('floor2Mode').value=state.floor2Mode;
+};
+const switchLevel82=switchLevel;
+switchLevel=function(level){if(level==='mezzanine'&&!state.floor2Enabled)return;switchLevel82(level);};
+function ensureFloor2StorageAccess83(){
+  if(!floor2HasStorage())return;
+  let cp=(state.zones||[]).find(z=>z.level==='mezzanine'&&z.name==='Центральный проход');
+  if(cp)return;
+  const w=Math.max(1.0,Math.min(2.2,Number(state.centralAisle)||1.6));
+  state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',level:'mezzanine',x:Math.max(0,state.mezzanineL/2-w/2),y:0,w,h:state.mezzanineW,rotation:90,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
+}
+function addFloor2(){state.floor2Enabled=true;state.floor2Mode='process';state.mezzanineL=Math.max(2,state.roomL);state.mezzanineW=Math.max(2,state.roomW);state.activeLevel='mezzanine';renderAll();}
+function removeFloor2(){
+  if(!state.floor2Enabled)return;const count=[...(state.zones||[]),...(state.objects||[]),...(state.columns||[])].filter(o=>o?.level==='mezzanine').length;
+  if(!confirm(`Удалить этаж 2? Объекты этажа будут удалены (${count} шт.).`))return;
+  state.zones=(state.zones||[]).filter(o=>o.level!=='mezzanine');state.objects=(state.objects||[]).filter(o=>o.level!=='mezzanine');state.columns=(state.columns||[]).filter(o=>o.level!=='mezzanine');state.floor2Enabled=false;state.floor2Mode='process';state.activeLevel='ground';selected={kind:null,index:null};renderAll();
+}
+function safeFileName83(name){return String(name||'MFC-Plan').replace(/[\\/:*?"<>|]+/g,'_').replace(/\s+/g,' ').trim().slice(0,90)||'MFC-Plan';}
+function reportProjectName83(){const p=(typeof currentProjectList==='function'?currentProjectList():[]).find(x=>String(x.id)===String(currentProjectId));return p?.name||$('currentProjectName')?.textContent||`MFC ${fmt1(state.roomL*state.roomW)} м²`;}
+function downloadBlob83(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1200);}
+function inlineSvg83(){const svg=$('plan'),clone=svg.cloneNode(true),src=[svg,...svg.querySelectorAll('*')],dst=[clone,...clone.querySelectorAll('*')],props=['fill','stroke','stroke-width','stroke-dasharray','opacity','font-family','font-size','font-weight'];src.forEach((el,i)=>{if(!dst[i])return;const cs=getComputedStyle(el);dst[i].setAttribute('style',props.map(p=>`${p}:${cs.getPropertyValue(p)}`).join(';'));});clone.setAttribute('xmlns','http://www.w3.org/2000/svg');return new XMLSerializer().serializeToString(clone);}
+function captureFloorSvg83(level){const old=state.activeLevel;if(level==='mezzanine'&&!state.floor2Enabled)return '';state.activeLevel=level;draw();const s=inlineSvg83();state.activeLevel=old;draw();return s;}
+function htmlEsc83(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function reportRows83(){const a=analytics(),s=a.scaling;return {summary:[['Площадь этажа 1, м²',a.groundArea],['Площадь этажа 2, м²',a.mezzanineArea],['Площадь стеллажей, м²',a.rackUsedArea],['Секции',a.totalSections],['Рабочая вместимость, ШК',a.cap],['Поток от вместимости, ШК/мес',s.plannedFlow],['Добавить операторов',s.addedOperatorPositions],['ФОТ после масштабирования, ₽',s.afterAddFOT],['OPEX после масштабирования, ₽',s.afterAddOpex]],floors:[['Этаж 1','смешанный',a.groundArea,a.rp.total,a.groundRackArea],...(state.floor2Enabled?[['Этаж 2',state.floor2Mode,a.mezzanineArea,a.rp2.total,a.floor2RackArea]]:[])],storage:[['Длина секции, м',state.rackL],['Глубина, м',state.rackD],['Высота, м',state.rackH],['Проход, м',state.aisle],['Заполнение, %',state.fillPct],['Секции этаж 1',a.rp.total],['Секции этаж 2',a.rp2.total]],process:[['Приёмка',state.normAccept],['Раскладка',state.normPutaway],['Сборка',state.normPick],['Отгрузка',state.normShip]],staff:[['Операторы / смену',state.opsPerShift],['Смен / сутки',state.shiftsPerDay],['Старшие',state.seniors],['Руководители',state.managers]],finance:[['Аренда, ₽/мес',state.rent],['CAPEX, ₽',state.capex],['ФОТ текущий, ₽',s.currentFOT],['ФОТ после, ₽',s.afterAddFOT],['OPEX после, ₽',s.afterAddOpex]]};}
+function buildReportHtml(){const a=analytics(),s=a.scaling,name=reportProjectName83(),svg1=captureFloorSvg83('ground'),svg2=state.floor2Enabled?captureFloorSvg83('mezzanine'):'';const checks=validationIsCurrent()?validationReport.issues.map(x=>`<li class="${x.severity}">${htmlEsc83(x.title)}${x.detail?' — '+htmlEsc83(x.detail):''}</li>`).join(''):'<li>Validation Engine не запускался после последних изменений.</li>';return `<!doctype html><html><head><meta charset="utf-8"><title>${htmlEsc83(name)}</title><style>@page{size:A4 landscape;margin:11mm}*{box-sizing:border-box}body{font-family:Arial;color:#281b31}h1,h2{color:#552879}.meta{color:#766b7d;font-size:11px}.page{break-after:page}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.kpi{border:1px solid #e4d9ea;border-radius:10px;padding:10px}.kpi span{font-size:10px;color:#7d7184}.kpi b{display:block;font-size:18px;color:#5a2a80}.plan svg{width:100%;max-height:155mm}.tbl{border-collapse:collapse;width:100%;font-size:11px}.tbl th,.tbl td{border:1px solid #e4dce8;padding:6px;text-align:left}.tbl th{background:#f3edf7}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.bad{color:#a12f49}.warn{color:#986719}.good{color:#27733b}</style></head><body><section class="page"><h1>MFC Planner — ${htmlEsc83(name)}</h1><div class="meta">${new Date().toLocaleString('ru-RU')} · версия 8.3</div><div class="kpis"><div class="kpi"><span>Общая площадь</span><b>${fmt1(a.totalOperationalArea)} м²</b></div><div class="kpi"><span>Стеллажи</span><b>${fmt1(a.rackUsedArea)} м²</b></div><div class="kpi"><span>Вместимость</span><b>${fmt(a.cap)} ШК</b></div><div class="kpi"><span>Поток</span><b>${fmt(s.plannedFlow)} ШК/мес</b></div></div><h2>Сводка</h2><table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr><tr><td>Этажей</td><td>${state.floor2Enabled?2:1}</td></tr><tr><td>Секции</td><td>${fmt(a.totalSections)}</td></tr><tr><td>Добавить операторов</td><td>${fmt(s.addedOperatorPositions)}</td></tr><tr><td>ФОТ после масштабирования</td><td>${money(s.afterAddFOT)}</td></tr><tr><td>OPEX после масштабирования</td><td>${money(s.afterAddOpex)}</td></tr></table></section><section class="page plan"><h2>Этаж 1 — план</h2>${svg1}</section>${state.floor2Enabled?`<section class="page plan"><h2>Этаж 2 — план</h2>${svg2}</section>`:''}<section><div class="two"><div><h2>Хранение</h2><table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr><tr><td>Секции этаж 1</td><td>${fmt(a.rp.total)}</td></tr><tr><td>Секции этаж 2</td><td>${fmt(a.rp2.total)}</td></tr><tr><td>Рабочая вместимость</td><td>${fmt(a.cap)} ШК</td></tr><tr><td>Заполнение</td><td>${fmt1(state.fillPct)}%</td></tr></table></div><div><h2>Персонал</h2><table class="tbl"><tr><th>Показатель</th><th>Значение</th></tr><tr><td>Плановый поток</td><td>${fmt(s.plannedFlow)} ШК/мес</td></tr><tr><td>Текущая мощность</td><td>${fmt(s.currentMax)} ШК/мес</td></tr><tr><td>Рекомендуемые операторы</td><td>${s.recommendedPerShift} / смену</td></tr><tr><td>Добавить</td><td>${fmt(s.addedOperatorPositions)}</td></tr></table></div></div><h2>Проверка</h2><ul>${checks}</ul></section></body></html>`;}
+function exportProjectPdf(){const w=window.open('','_blank');if(!w)return alert('Разреши всплывающие окна для формирования PDF.');w.document.open();w.document.write(buildReportHtml());w.document.close();setTimeout(()=>{w.focus();w.print();},300);}
+function excelEsc83(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function excelSheet83(name,headers,rows){return `<Worksheet ss:Name="${excelEsc83(name)}"><Table>${[headers,...rows].map(row=>'<Row>'+row.map(v=>{const num=typeof v==='number'&&Number.isFinite(v);return `<Cell><Data ss:Type="${num?'Number':'String'}">${excelEsc83(v)}</Data></Cell>`}).join('')+'</Row>').join('')}</Table></Worksheet>`;}
+function buildExcelXml(){const r=reportRows83();return `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${excelSheet83('Сводка',['Показатель','Значение'],r.summary)}${excelSheet83('Этажи',['Этаж','Назначение','Площадь м2','Секции','Стеллажи м2'],r.floors)}${excelSheet83('Хранение',['Показатель','Значение'],r.storage)}${excelSheet83('Процессы',['Операция','Норма ШК/смену'],r.process)}${excelSheet83('Персонал',['Показатель','Значение'],r.staff)}${excelSheet83('Экономика',['Показатель','Значение'],r.finance)}</Workbook>`;}
+function exportProjectExcel(){downloadBlob83(new Blob(['\ufeff'+buildExcelXml()],{type:'application/vnd.ms-excel;charset=utf-8'}),`${safeFileName83(reportProjectName83())}-расчёты.xls`);}
+function exportPlanPng(){const svgText=inlineSvg83(),url=URL.createObjectURL(new Blob([svgText],{type:'image/svg+xml;charset=utf-8'})),img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=2000;c.height=1180;const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);c.toBlob(b=>downloadBlob83(b,`${safeFileName83(reportProjectName83())}-${levelTitle()}.png`),'image/png');};img.onerror=()=>{URL.revokeObjectURL(url);alert('Не удалось сформировать PNG.');};img.src=url;}
 const inputIds=['roomL','roomW','roomH','mezzanineL','mezzanineW','avgSkuL','targetFlow','simFlow','centralAisle','rackL','rackD','rackH','shelves','aisle','fillPct','normAccept','normPutaway','normPick','normShip','opsPerShift','shiftsPerDay','paidHours','opRate','seniors','seniorSalary','managers','managerSalary','turnoverRate','staffingTargetUtil','cameraRange','coverageStep','sideWallGap'];
 inputIds.forEach(id=>{const el=$(id);el.value=state[id];el.oninput=()=>{state[id]=parseFloat(el.value)||0;if(id==='centralAisle'){
   state.centralAisle=clamp(state.centralAisle,1.2,2.6);
@@ -2976,6 +3074,9 @@ $('setScalingBaselineBtn').onclick=setScalingBaseline;
 $('applyScalingFlowBtn').onclick=applyScalingFlow;
 $('applyScalingStaffBtn').onclick=applyScalingStaff;
 document.querySelectorAll('[data-level-switch]').forEach(b=>b.onclick=()=>switchLevel(b.dataset.levelSwitch));
+$('addFloorBtn').onclick=addFloor2;
+$('removeFloorBtn').onclick=removeFloor2;
+$('floor2Mode').onchange=()=>{state.floor2Mode=$('floor2Mode').value;if(floor2HasStorage())ensureFloor2StorageAccess83();optimizerAllCandidates=[];optimizerVariants=[];renderVariantSelector();renderAll();};
 $('optBtn').onclick=optimize;
 $('optSideBtn').onclick=optimize;
 $('centerAisleBtn').onclick=()=>{
@@ -3026,7 +3127,10 @@ $('cloudApiBase').onchange=()=>{
   renderCloudStatus();
 };
 $('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план? Сохранённые планы останутся.')){state=structuredClone(defaults);initZones();migrateV69();selected={kind:null};currentProjectId='';localStorage.removeItem(CURRENT_PROJECT_KEY);inputIds.forEach(id=>{if($(id))$(id).value=state[id]});if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderProjectSelector();renderAll()}};
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v8.2.json';a.click();URL.revokeObjectURL(a.href)};
+$('exportPdfBtn').onclick=exportProjectPdf;
+$('exportExcelBtn').onclick=exportProjectExcel;
+$('exportPngBtn').onclick=exportPlanPng;
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v8.3.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));sanitizeState();migrateSmartZones();migrateV69();selected={kind:null};inputIds.forEach(id=>{if($(id))$(id).value=state[id]});$('layoutMode').value=state.layoutMode;if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
