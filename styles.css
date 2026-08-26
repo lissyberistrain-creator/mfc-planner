@@ -228,3 +228,11 @@ h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9
 
 /* 8.3 Floors + Reports */
 .floor-actions{display:grid;gap:7px;margin:8px 0}.floor2-settings{display:grid;gap:7px;margin-top:8px;padding-top:8px;border-top:1px solid #eadff0}.reports-panel{border-color:#dac9e6}.reports-panel .btn{margin-top:6px}
+
+/* 8.4 Multi-floor Optimizer */
+.mf-optimizer-panel{border-color:#d5c1e5}
+.mf-details{margin-top:8px}
+.mf-kpis{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.mf-kpis div{background:#fcfbfd;border:1px solid #e9e0ef;border-radius:9px;padding:8px}
+.mf-kpis span{display:block;font-size:9px;color:#817587}
+.mf-kpis b{display:block;margin-top:3px;font-size:12px;color:#542e79}

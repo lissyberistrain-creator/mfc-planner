@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 8.3</title>
-  <link rel="stylesheet" href="styles.css?v=8.3">
+  <title>MFC Planner 8.4.1</title>
+  <link rel="stylesheet" href="styles.css?v=8.4.1">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">8.3</span></div>
+    <div class="brand">MFC Planner <span class="ver">8.4.1</span></div>
     <div class="sub">Интерактивный конструктор: облачные проекты, хранение, штат, этажи и оптимизация</div>
   </div>
   <div class="actions">
@@ -93,8 +93,31 @@
         <label>Этаж 2, ширина<input id="mezzanineW" type="number" step="0.1"></label>
       </div>
     </div>
-    <div class="hint">Этаж 2 добавляется отдельно. В режиме «Только процессы» он не увеличивает вместимость ШК.</div>
+    <div class="hint">По умолчанию существует только Этаж 1. Этаж 2 появляется только после нажатия «+ Добавить этаж».</div>
   </section>
+
+  <section class="panel mf-optimizer-panel">
+    <div class="headrow">
+      <h3>Multi-floor Optimizer 8.4</h3>
+      <span id="mfOptimizerBadge" class="badge-lite">сценарии этажей</span>
+    </div>
+    <label>Цель оптимизации
+      <select id="mfGoal">
+        <option value="capacity">Максимум хранения</option>
+        <option value="balanced">Баланс</option>
+        <option value="staff">Минимум персонала</option>
+      </select>
+    </label>
+    <button id="mfRunBtn" class="btn primary wide" type="button">Сравнить варианты этажей</button>
+    <label>Вариант
+      <select id="mfVariantSelect"><option value="">Сначала запусти сравнение</option></select>
+    </label>
+    <div id="mfVariantDetails" class="mf-details">
+      <div class="hint">Сравним: этаж 2 под процессы, под хранение и смешанный режим.</div>
+    </div>
+    <button id="mfApplyBtn" class="btn secondary wide" type="button">Применить выбранный вариант</button>
+  </section>
+
 
   <section class="panel emphasis">
     <h3>Автопланировка</h3>
@@ -297,6 +320,7 @@
     <div class="card"><span>Автоштат по target</span><b id="mStaff"></b></div>
     <div class="card"><span>Поток от вместимости</span><b id="mScaledFlow"></b></div>
     <div class="card"><span>Добавить операторов</span><b id="mAddStaff"></b></div>
+    <div class="card"><span>Этажная стратегия</span><b id="mFloorStrategy">—</b></div>
     <div class="card"><span>Планировочный score</span><b id="mValidation">—</b></div>
   </section>
 
@@ -356,6 +380,7 @@
       <button class="tab" data-tab="video">Камеры</button>
       <button class="tab" data-tab="equip">Оборудование</button>
       <button class="tab" data-tab="levels">Этажи</button>
+      <button class="tab" data-tab="floor-opt">Оптимизация этажей</button>
       <button class="tab" data-tab="analytics">Аналитика</button>
       <button class="tab" data-tab="checks">Проверки</button>
     </div>
@@ -366,12 +391,13 @@
     <div id="tab-video" class="tabcontent"></div>
     <div id="tab-equip" class="tabcontent"></div>
     <div id="tab-levels" class="tabcontent"></div>
+    <div id="tab-floor-opt" class="tabcontent"></div>
     <div id="tab-analytics" class="tabcontent"></div>
     <div id="tab-checks" class="tabcontent"></div>
   </section>
 </main>
 </div>
 
-<script src="app.js?v=8.3"></script>
+<script src="app.js?v=8.4.1"></script>
 </body>
 </html>
