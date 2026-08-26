@@ -1784,6 +1784,10 @@ let cloudUser=null;
 let cloudProjects=[];
 let cloudLastSync=null;
 let cloudAutosaveBusy=false;
+let cloudCurrentUpdatedAt='';
+let cloudSyncState='idle';
+let sharedProject=null;
+let cloudCollabView='';
 
 function escapeHtml(s){return String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));}
 
@@ -1826,14 +1830,18 @@ async function cloudFetch(path,options={}){
   let data=null;
   try{data=await res.json()}catch(e){data=null}
   if(!res.ok){
-    const message=data?.detail||data?.message||`HTTP ${res.status}`;
+    const detail=data?.detail;
+    const message=(typeof detail==='object'&&detail?.message)?detail.message:(typeof detail==='string'?detail:(data?.message||`HTTP ${res.status}`));
+    const err=new Error(message);
+    err.status=res.status;
+    err.payload=data;
     if(res.status===401){
       cloudToken='';
       cloudUser=null;
       localStorage.removeItem(CLOUD_TOKEN_KEY);
       renderCloudStatus();
     }
-    throw new Error(message);
+    throw err;
   }
   return data;
 }
@@ -1873,6 +1881,7 @@ function renderCloudStatus(){
   }else{
     setCloudSyncMessage('Сервер не настроен. Сохранённые планы работают локально.');
   }
+  renderCloudCollaboration85();
 }
 
 async function cloudCheck(){
@@ -1922,7 +1931,7 @@ async function cloudLogin(){
     cloudToken=data.token;
     cloudUser=data.user;
     localStorage.setItem(CLOUD_TOKEN_KEY,cloudToken);
-    currentProjectId='';
+    currentProjectId='';sharedProject=null;cloudCurrentUpdatedAt='';
     localStorage.removeItem(CURRENT_PROJECT_KEY);
     await cloudRefreshProjects();
     renderCloudStatus();
@@ -1934,7 +1943,7 @@ function cloudLogout(){
   cloudToken='';
   cloudUser=null;
   cloudProjects=[];
-  currentProjectId='';
+  currentProjectId='';sharedProject=null;cloudCurrentUpdatedAt='';
   localStorage.removeItem(CLOUD_TOKEN_KEY);
   localStorage.removeItem(CURRENT_PROJECT_KEY);
   renderCloudStatus();
@@ -1967,18 +1976,245 @@ async function cloudRefreshProjects(){
   renderCloudStatus();
 }
 
+
+function currentCloudProject(){
+  return cloudProjects.find(p=>String(p.id)===String(currentProjectId))||null;
+}
+function currentCloudRole(){
+  if(sharedProject)return sharedProject.role||'viewer';
+  return currentCloudProject()?.role||'owner';
+}
+function canEditCurrentCloudProject(){
+  return ['owner','editor'].includes(currentCloudRole());
+}
+function canOwnCurrentCloudProject(){
+  return currentCloudRole()==='owner'&&!sharedProject;
+}
+function setCloudSyncState(stateName,message=''){
+  cloudSyncState=stateName;
+  const top=$('cloudTopStatus');
+  if(sharedProject){
+    if(top){
+      top.className='cloud-top-status '+(stateName==='error'||stateName==='conflict'?'pending':'cloud');
+      top.textContent=stateName==='syncing'?'⟳ ссылка':stateName==='conflict'?'⚠ конфликт':`● ссылка: ${sharedProject.role==='editor'?'редактор':'просмотр'}`;
+    }
+  }else if(cloudConnected()&&top){
+    top.className='cloud-top-status '+(stateName==='error'||stateName==='conflict'?'pending':'cloud');
+    top.textContent=stateName==='syncing'?'⟳ синхронизация':stateName==='conflict'?'⚠ конфликт':stateName==='error'?'⚠ ошибка':'● облако';
+  }
+  if(message&&$('projectSaveStatus'))$('projectSaveStatus').textContent=message;
+}
+function renderCloudCollaboration85(){
+  const panel=$('cloudCollabPanel');
+  const banner=$('sharedProjectBanner');
+  const owner=canOwnCurrentCloudProject();
+  const editable=canEditCurrentCloudProject();
+  const hasProject=!!(currentProjectId||sharedProject);
+
+  if($('cloudShareBtn'))$('cloudShareBtn').classList.toggle('hidden',!owner||!hasProject);
+  if($('cloudMembersBtn'))$('cloudMembersBtn').classList.toggle('hidden',!owner||!hasProject);
+  if($('cloudHistoryBtn'))$('cloudHistoryBtn').classList.toggle('hidden',!cloudConnected()||!currentProjectId);
+
+  if(banner){
+    banner.classList.toggle('hidden',!sharedProject);
+    if(sharedProject){
+      banner.innerHTML=`<b>Открыто по ссылке · ${sharedProject.role==='editor'?'редактирование':'только просмотр'}</b>
+        <span>${escapeHtml(sharedProject.name||'Общий проект')}</span>`;
+    }
+  }
+
+  const saveBtn=$('saveBtn');
+  if(saveBtn&&sharedProject&&sharedProject.role==='viewer'){
+    saveBtn.disabled=true;
+    saveBtn.title='Эта ссылка доступна только для просмотра';
+  }else if(saveBtn){
+    saveBtn.disabled=false;
+    saveBtn.title='';
+  }
+
+  if(panel&&!cloudCollabView)panel.classList.add('hidden');
+}
+async function handleCloudConflict85(error){
+  setCloudSyncState('conflict','⚠ Проект изменён на сервере другим пользователем. Локальные изменения не перезаписаны.');
+  if(!confirm('На сервере уже есть более новая версия проекта. Открыть актуальную версию? Нажми «Отмена», чтобы оставить локальный вариант и сохранить его позже как копию.'))return false;
+  try{
+    const item=sharedProject
+      ? await cloudFetch(`/share/${sharedProject.token}`)
+      : await cloudFetch(`/projects/${currentProjectId}`);
+    state=Object.assign(structuredClone(defaults),JSON.parse(JSON.stringify(item.layout||{})));
+    sanitizeState();migrateSmartZones();migrateV69();
+    cloudCurrentUpdatedAt=item.updated_at||'';
+    if(sharedProject){
+      sharedProject={...sharedProject,...item,token:sharedProject.token};
+    }
+    inputIds.forEach(k=>{if($(k))$(k).value=state[k]});
+    renderAll();
+    setCloudSyncState('saved','☁ Загружена актуальная версия с сервера.');
+    return true;
+  }catch(e){
+    setCloudSyncState('error','⚠ Не удалось загрузить актуальную версию: '+e.message);
+    return false;
+  }
+}
+async function openCloudHistory85(){
+  if(!cloudConnected()||!currentProjectId)return alert('Выбери облачный проект.');
+  cloudCollabView='history';
+  const panel=$('cloudCollabPanel');panel.classList.remove('hidden');
+  panel.innerHTML='<div class="hint">Загрузка истории…</div>';
+  try{
+    const versions=await cloudFetch(`/projects/${currentProjectId}/versions`);
+    panel.innerHTML=`<div class="collab-head"><b>История версий</b><button class="collab-close" type="button">×</button></div>
+      <div class="version-list">${versions.slice(0,20).map(v=>`<div class="version-row">
+        <div><b>Версия ${v.version_no}</b><span>${new Date(v.created_at).toLocaleString('ru-RU')}</span></div>
+        ${canEditCurrentCloudProject()?`<button class="btn compact" data-restore-version="${v.id}">Восстановить</button>`:''}
+      </div>`).join('')||'<div class="hint">Истории пока нет.</div>'}</div>`;
+    panel.querySelector('.collab-close').onclick=()=>{cloudCollabView='';panel.classList.add('hidden')};
+    panel.querySelectorAll('[data-restore-version]').forEach(btn=>btn.onclick=()=>restoreCloudVersion85(btn.dataset.restoreVersion));
+  }catch(e){panel.innerHTML='<div class="hint">Ошибка: '+escapeHtml(e.message)+'</div>'}
+}
+async function restoreCloudVersion85(versionId){
+  if(!confirm('Восстановить эту версию? Текущее состояние останется в истории как отдельная версия.'))return;
+  try{
+    const item=await cloudFetch(`/projects/${currentProjectId}/versions/${versionId}/restore`,{method:'POST'});
+    cloudCurrentUpdatedAt=item.updated_at||'';
+    state=Object.assign(structuredClone(defaults),JSON.parse(JSON.stringify(item.layout||{})));
+    sanitizeState();migrateSmartZones();migrateV69();
+    inputIds.forEach(k=>{if($(k))$(k).value=state[k]});
+    await cloudRefreshProjects();renderAll();openCloudHistory85();
+    setCloudSyncState('saved','☁ Версия восстановлена и сохранена на сервере.');
+  }catch(e){alert('История: '+e.message)}
+}
+async function openCloudMembers85(){
+  if(!canOwnCurrentCloudProject())return alert('Управлять участниками может только владелец проекта.');
+  cloudCollabView='members';
+  const panel=$('cloudCollabPanel');panel.classList.remove('hidden');
+  panel.innerHTML='<div class="hint">Загрузка участников…</div>';
+  try{
+    const members=await cloudFetch(`/projects/${currentProjectId}/members`);
+    panel.innerHTML=`<div class="collab-head"><b>Участники</b><button class="collab-close" type="button">×</button></div>
+      <div class="member-add">
+        <input id="cloudMemberEmail" type="email" placeholder="email пользователя">
+        <select id="cloudMemberRole"><option value="viewer">Просмотр</option><option value="editor">Редактор</option></select>
+        <button id="cloudMemberAddBtn" class="btn compact primary">Добавить</button>
+      </div>
+      <div class="member-list">${members.map(m=>`<div class="member-row">
+        <div><b>${escapeHtml(m.display_name||m.email)}</b><span>${escapeHtml(m.email)} · ${m.role==='owner'?'владелец':m.role==='editor'?'редактор':'просмотр'}</span></div>
+        ${m.role!=='owner'?`<button class="btn compact danger" data-remove-member="${m.user_id}">Удалить</button>`:''}
+      </div>`).join('')}</div>`;
+    panel.querySelector('.collab-close').onclick=()=>{cloudCollabView='';panel.classList.add('hidden')};
+    $('cloudMemberAddBtn').onclick=addCloudMember85;
+    panel.querySelectorAll('[data-remove-member]').forEach(btn=>btn.onclick=()=>removeCloudMember85(btn.dataset.removeMember));
+  }catch(e){panel.innerHTML='<div class="hint">Ошибка: '+escapeHtml(e.message)+'</div>'}
+}
+async function addCloudMember85(){
+  const email=($('cloudMemberEmail')?.value||'').trim();
+  const role=$('cloudMemberRole')?.value||'viewer';
+  if(!email)return alert('Укажи email.');
+  try{
+    await cloudFetch(`/projects/${currentProjectId}/members`,{method:'POST',body:JSON.stringify({email,role})});
+    await openCloudMembers85();
+  }catch(e){alert('Участники: '+e.message)}
+}
+async function removeCloudMember85(userId){
+  if(!confirm('Убрать пользователя из проекта?'))return;
+  try{
+    await cloudFetch(`/projects/${currentProjectId}/members/${userId}`,{method:'DELETE'});
+    await openCloudMembers85();
+  }catch(e){alert('Участники: '+e.message)}
+}
+async function createCloudShareLink85(){
+  if(!canOwnCurrentCloudProject())return alert('Создавать ссылки может только владелец проекта.');
+  const editor=confirm('Сделать ссылку с правом РЕДАКТИРОВАНИЯ?\n\nОК — редактор.\nОтмена — только просмотр.');
+  const role=editor?'editor':'viewer';
+  try{
+    const data=await cloudFetch(`/projects/${currentProjectId}/share-links`,{
+      method:'POST',body:JSON.stringify({role,expires_days:30})
+    });
+    const base=location.href.split('?')[0].split('#')[0];
+    const link=`${base}?share=${encodeURIComponent(data.token)}&api=${encodeURIComponent(cloudApiBase)}`;
+    let copied=false;
+    try{await navigator.clipboard.writeText(link);copied=true}catch(e){}
+    const panel=$('cloudCollabPanel');
+    cloudCollabView='share';panel.classList.remove('hidden');
+    panel.innerHTML=`<div class="collab-head"><b>Ссылка создана</b><button class="collab-close" type="button">×</button></div>
+      <div class="share-result"><span>${role==='editor'?'Редактирование':'Только просмотр'} · 30 дней</span>
+      <input id="cloudShareLinkValue" readonly value="${escapeHtml(link)}">
+      <button id="cloudCopyShareBtn" class="btn primary wide">${copied?'Скопировано':'Скопировать ссылку'}</button></div>`;
+    panel.querySelector('.collab-close').onclick=()=>{cloudCollabView='';panel.classList.add('hidden')};
+    $('cloudCopyShareBtn').onclick=async()=>{try{await navigator.clipboard.writeText(link);$('cloudCopyShareBtn').textContent='Скопировано'}catch(e){$('cloudShareLinkValue').select()}};
+  }catch(e){alert('Поделиться: '+e.message)}
+}
+async function openSharedProject85(){
+  const params=new URLSearchParams(location.search);
+  const token=params.get('share');
+  const api=params.get('api');
+  if(!token)return false;
+  if(api){
+    cloudApiBase=api.replace(/\/+$/,'');
+    localStorage.setItem(CLOUD_API_KEY,cloudApiBase);
+  }
+  if(!cloudApiBase){
+    alert('В ссылке не указан адрес Cloud API.');
+    return false;
+  }
+  try{
+    const item=await cloudFetch(`/share/${encodeURIComponent(token)}`);
+    sharedProject={...item,token};
+    cloudCurrentUpdatedAt=item.updated_at||'';
+    currentProjectId='';
+    state=Object.assign(structuredClone(defaults),JSON.parse(JSON.stringify(item.layout||{})));
+    sanitizeState();migrateSmartZones();migrateV69();
+    inputIds.forEach(k=>{if($(k))$(k).value=state[k]});
+    if($('currentProjectName'))$('currentProjectName').textContent=item.name;
+    renderCloudStatus();renderCloudCollaboration85();renderAll();
+    setCloudSyncState('saved',`☁ Общий проект · ${item.role==='editor'?'можно редактировать':'только просмотр'}.`);
+    return true;
+  }catch(e){
+    alert('Общая ссылка: '+e.message);
+    return false;
+  }
+}
+async function saveSharedProject85(){
+  if(!sharedProject)return false;
+  if(sharedProject.role!=='editor'){
+    alert('Эта ссылка доступна только для просмотра.');
+    return true;
+  }
+  try{
+    setCloudSyncState('syncing','⟳ Сохраняю общий проект…');
+    const item=await cloudFetch(`/share/${encodeURIComponent(sharedProject.token)}`,{
+      method:'PUT',
+      body:JSON.stringify({
+        name:sharedProject.name||'Общий проект',
+        layout:projectSnapshot(),
+        expected_updated_at:cloudCurrentUpdatedAt||null
+      })
+    });
+    sharedProject={...sharedProject,...item,token:sharedProject.token};
+    cloudCurrentUpdatedAt=item.updated_at||'';
+    cloudLastSync=new Date();
+    setCloudSyncState('saved','☁ Общий проект сохранён на сервере: '+cloudLastSync.toLocaleTimeString('ru-RU'));
+    return true;
+  }catch(e){
+    if(e.status===409)await handleCloudConflict85(e);
+    else setCloudSyncState('error','⚠ Ошибка облачного сохранения: '+e.message);
+    return true;
+  }
+}
 function renderProjectSelector(){
   const sel=$('projectSelect');
   if(!sel)return;
   const projects=[...currentProjectList()].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
   const prefix=cloudConnected()?'☁ Мои облачные планы':'Мои локальные планы';
   sel.innerHTML=`<option value="">${prefix} (${projects.length})</option>`+
-    projects.map(p=>`<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`).join('');
+    projects.map(p=>`<option value="${escapeHtml(String(p.id))}">${p.role==='viewer'?'👁 ':p.role==='editor'?'✎ ':'☁ '}${escapeHtml(p.name)}</option>`).join('');
   if(currentProjectId&&projects.some(p=>String(p.id)===String(currentProjectId)))sel.value=String(currentProjectId);
-  if($('currentProjectName'))$('currentProjectName').textContent=projectNameById(currentProjectId);
+  if($('currentProjectName')&&!sharedProject)$('currentProjectName').textContent=projectNameById(currentProjectId);
+  renderCloudCollaboration85();
 }
 
 async function saveNamedProject(forceNew=false){
+  if(sharedProject&&!forceNew)return saveSharedProject85();
   if(cloudConnected())return saveCloudProject(forceNew);
 
   const projects=readProjects();
@@ -2005,18 +2241,33 @@ async function saveNamedProject(forceNew=false){
 }
 
 async function saveCloudProject(forceNew=false){
+  if(sharedProject)return saveSharedProject85();
+
   const current=cloudProjects.find(p=>String(p.id)===String(currentProjectId));
+  const role=current?.role||'owner';
+  if(current&&!forceNew&&role==='viewer'){
+    alert('У тебя доступ только для просмотра. Используй «Сохранить как», чтобы создать свою копию.');
+    return;
+  }
+
   const defaultName=forceNew
     ? (current?current.name+' — копия':`MFC ${fmt1(state.roomL*state.roomW)} м² — вариант`)
     : (current?current.name:`MFC ${fmt1(state.roomL*state.roomW)} м²`);
+
   const name=prompt(forceNew?'Название нового облачного плана:':'Название облачного плана:',defaultName);
   if(!name||!name.trim())return;
+
   try{
+    setCloudSyncState('syncing','⟳ Сохраняю проект в облако…');
     let item;
     if(current&&!forceNew){
       item=await cloudFetch(`/projects/${current.id}`,{
         method:'PUT',
-        body:JSON.stringify({name:name.trim(),layout:projectSnapshot()})
+        body:JSON.stringify({
+          name:name.trim(),
+          layout:projectSnapshot(),
+          expected_updated_at:cloudCurrentUpdatedAt||current.updated_at||null
+        })
       });
     }else{
       item=await cloudFetch('/projects',{
@@ -2024,13 +2275,22 @@ async function saveCloudProject(forceNew=false){
         body:JSON.stringify({name:name.trim(),layout:projectSnapshot()})
       });
     }
+
     currentProjectId=String(item.id);
+    cloudCurrentUpdatedAt=item.updated_at||'';
     localStorage.setItem(CURRENT_PROJECT_KEY,currentProjectId);
     cloudLastSync=new Date();
     await cloudRefreshProjects();
     renderProjectSelector();
-    if($('projectSaveStatus'))$('projectSaveStatus').textContent='☁ Сохранено в облако: '+new Date().toLocaleString('ru-RU');
-  }catch(e){alert('Облачное сохранение: '+e.message)}
+    setCloudSyncState('saved','☁ Сохранено в облако: '+cloudLastSync.toLocaleString('ru-RU'));
+  }catch(e){
+    if(e.status===409){
+      await handleCloudConflict85(e);
+    }else{
+      setCloudSyncState('error','⚠ Ошибка сохранения: '+e.message);
+      alert('Облачное сохранение: '+e.message);
+    }
+  }
 }
 
 async function openProject(id){
@@ -2039,6 +2299,8 @@ async function openProject(id){
   if(cloudConnected()){
     try{
       p=await cloudFetch(`/projects/${id}`);
+      cloudCurrentUpdatedAt=p.updated_at||'';
+      sharedProject=null;
       p={...p,state:p.layout};
     }catch(e){return alert('Не удалось открыть облачный план: '+e.message)}
   }else{
@@ -2063,6 +2325,8 @@ async function deleteCurrentProject(){
   if(!confirm(`Удалить план «${p.name}»?`))return;
 
   if(cloudConnected()){
+    const current=currentCloudProject();
+    if(current&&current.role!=='owner')return alert('Удалить проект может только владелец.');
     try{
       await cloudFetch(`/projects/${currentProjectId}`,{method:'DELETE'});
       currentProjectId='';
@@ -2078,23 +2342,38 @@ async function deleteCurrentProject(){
 }
 
 async function autosaveCurrentProject(){
+  if(sharedProject){
+    if(sharedProject.role==='editor')await saveSharedProject85();
+    return;
+  }
   if(!currentProjectId)return;
 
   if(cloudConnected()){
     if(cloudAutosaveBusy)return;
     const current=cloudProjects.find(p=>String(p.id)===String(currentProjectId));
-    if(!current)return;
+    if(!current||current.role==='viewer')return;
     cloudAutosaveBusy=true;
     try{
-      await cloudFetch(`/projects/${currentProjectId}`,{
+      setCloudSyncState('syncing','⟳ Синхронизация с сервером…');
+      const item=await cloudFetch(`/projects/${currentProjectId}`,{
         method:'PUT',
-        body:JSON.stringify({name:current.name,layout:projectSnapshot()})
+        body:JSON.stringify({
+          name:current.name,
+          layout:projectSnapshot(),
+          expected_updated_at:cloudCurrentUpdatedAt||current.updated_at||null
+        })
       });
+      cloudCurrentUpdatedAt=item.updated_at||'';
+      current.updated_at=item.updated_at;
+      current.updatedAt=item.updated_at?new Date(item.updated_at).getTime():Date.now();
       cloudLastSync=new Date();
-      renderCloudStatus();
-      if($('projectSaveStatus'))$('projectSaveStatus').textContent='☁ Автосохранение на сервер: '+cloudLastSync.toLocaleTimeString('ru-RU');
+      setCloudSyncState('saved','☁ Автосохранение на сервер: '+cloudLastSync.toLocaleTimeString('ru-RU'));
     }catch(e){
-      if($('projectSaveStatus'))$('projectSaveStatus').textContent='⚠ Облачное автосохранение не выполнено: '+e.message;
+      if(e.status===409){
+        setCloudSyncState('conflict','⚠ Конфликт версий. Автосохранение остановлено, данные не перезаписаны.');
+      }else{
+        setCloudSyncState('error','⚠ Облачное автосохранение не выполнено: '+e.message);
+      }
     }finally{cloudAutosaveBusy=false}
     return;
   }
@@ -2129,7 +2408,8 @@ async function migrateLocalProjectsToCloud(){
 
 async function initCloudWorkspace(){
   renderCloudStatus();
-  await cloudRestoreSession();
+  const openedShared=await openSharedProject85();
+  if(!openedShared)await cloudRestoreSession();
 }
 
 
@@ -3267,6 +3547,10 @@ $('cloudLoginBtn').onclick=cloudLogin;
 $('cloudRegisterBtn').onclick=cloudRegister;
 $('cloudLogoutBtn').onclick=cloudLogout;
 $('cloudMigrateBtn').onclick=migrateLocalProjectsToCloud;
+$('cloudShareBtn').onclick=createCloudShareLink85;
+$('cloudMembersBtn').onclick=openCloudMembers85;
+$('cloudHistoryBtn').onclick=openCloudHistory85;
+
 $('cloudApiBase').onchange=()=>{
   cloudApiBase=$('cloudApiBase').value.trim().replace(/\/+$/,'');
   localStorage.setItem(CLOUD_API_KEY,cloudApiBase);
@@ -3276,7 +3560,7 @@ $('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план?
 $('exportPdfBtn').onclick=exportProjectPdf;
 $('exportExcelBtn').onclick=exportProjectExcel;
 $('exportPngBtn').onclick=exportPlanPng;
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v8.4.1.json';a.click();URL.revokeObjectURL(a.href)};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v8.5.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));sanitizeState();migrateSmartZones();migrateV69();selected={kind:null};inputIds.forEach(id=>{if($(id))$(id).value=state[id]});$('layoutMode').value=state.layoutMode;if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});

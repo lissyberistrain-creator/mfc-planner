@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 8.4.1</title>
-  <link rel="stylesheet" href="styles.css?v=8.4.1">
+  <title>MFC Planner 8.5</title>
+  <link rel="stylesheet" href="styles.css?v=8.5">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">8.4.1</span></div>
+    <div class="brand">MFC Planner <span class="ver">8.5</span></div>
     <div class="sub">Интерактивный конструктор: облачные проекты, хранение, штат, этажи и оптимизация</div>
   </div>
   <div class="actions">
@@ -36,6 +36,7 @@
     </div>
     <div class="project-current"><span>Текущий план</span><b id="currentProjectName">Черновик</b></div>
     <div class="hint" id="projectSaveStatus">Локальный черновик используется как резервная копия.</div>
+    <div id="sharedProjectBanner" class="shared-project-banner hidden"></div>
 
     <div class="cloud-box">
       <label>Cloud API
@@ -57,6 +58,15 @@
           <span>Облачный аккаунт</span>
           <b id="cloudUserLabel">—</b>
         </div>
+
+        <div class="cloud-project-tools">
+          <button id="cloudShareBtn" class="btn secondary wide">Поделиться ссылкой</button>
+          <button id="cloudMembersBtn" class="btn secondary wide">Участники и доступ</button>
+          <button id="cloudHistoryBtn" class="btn secondary wide">История версий</button>
+        </div>
+
+        <div id="cloudCollabPanel" class="cloud-collab-panel hidden"></div>
+
         <button id="cloudMigrateBtn" class="btn secondary wide">Перенести локальные планы в облако</button>
         <button id="cloudLogoutBtn" class="btn secondary wide">Выйти из облака</button>
       </div>
@@ -398,6 +408,6 @@
 </main>
 </div>
 
-<script src="app.js?v=8.4.1"></script>
+<script src="app.js?v=8.5"></script>
 </body>
 </html>

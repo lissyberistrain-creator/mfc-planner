@@ -236,3 +236,28 @@ h2,h3,h4{margin:0 0 12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9
 .mf-kpis div{background:#fcfbfd;border:1px solid #e9e0ef;border-radius:9px;padding:8px}
 .mf-kpis span{display:block;font-size:9px;color:#817587}
 .mf-kpis b{display:block;margin-top:3px;font-size:12px;color:#542e79}
+
+
+/* MFC Planner 8.5 — Cloud Projects & Sharing */
+.cloud-project-tools{display:grid;gap:6px;margin:7px 0}
+.cloud-collab-panel{
+  margin:8px 0;padding:9px;border:1px solid #e1d5e9;background:#fbf8fd;border-radius:10px
+}
+.collab-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.collab-close{border:0;background:transparent;font-size:18px;color:#6d5f75;cursor:pointer}
+.version-list,.member-list{display:grid;gap:6px}
+.version-row,.member-row{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:7px;background:#fff;border:1px solid #ece3f1;border-radius:8px
+}
+.version-row span,.member-row span{display:block;font-size:9px;color:#85788d;margin-top:2px}
+.member-add{display:grid;grid-template-columns:1fr 96px auto;gap:5px;margin-bottom:8px}
+.member-add input,.member-add select{min-width:0}
+.share-result{display:grid;gap:7px}
+.share-result span{font-size:10px;color:#75677d}
+.shared-project-banner{
+  margin-top:7px;padding:7px 9px;border-radius:9px;background:#edf7f0;border:1px solid #c6e2ce;
+  color:#2d6e40
+}
+.shared-project-banner b,.shared-project-banner span{display:block}
+.shared-project-banner span{font-size:9px;margin-top:2px}
