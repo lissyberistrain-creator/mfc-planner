@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MFC Planner 8.5</title>
-  <link rel="stylesheet" href="styles.css?v=8.5">
+  <title>MFC Planner 8.5.1</title>
+  <link rel="stylesheet" href="styles.css?v=8.5.1">
 </head>
 <body>
 <header class="topbar">
   <div>
-    <div class="brand">MFC Planner <span class="ver">8.5</span></div>
+    <div class="brand">MFC Planner <span class="ver">8.5.1</span></div>
     <div class="sub">Интерактивный конструктор: облачные проекты, хранение, штат, этажи и оптимизация</div>
   </div>
   <div class="actions">
@@ -146,7 +146,7 @@
   </section>
 
   <section class="panel optimizer-panel">
-    <div class="headrow"><h3>Optimizer 7.5</h3><span class="badge-lite">ТОП-10</span></div>
+    <div class="headrow"><h3>Optimizer 8.5.1</h3><span class="badge-lite">доступные улицы</span></div>
     <label>Цель поиска
       <select id="optimizerGoal">
         <option value="capacity">Максимум хранения</option>
@@ -165,7 +165,7 @@
       <button id="applyVariantBtn" class="btn secondary wide">Применить выбранный вариант</button>
       <button id="fillStorageBtn" class="btn primary wide">Дозаполнить хранение</button>
     </div>
-    <div class="hint">Зелёным показываются дополнительные секции. «Дозаполнить хранение» применяет абсолютный максимум по секциям.</div>
+    <div class="hint">В ТОП попадают только физически доступные варианты: все рабочие проходы должны иметь маршрут к процессной/входной зоне. ЦП строится поперёк улиц.</div>
   </section>
 
   <section class="panel validation-panel">
@@ -408,6 +408,6 @@
 </main>
 </div>
 
-<script src="app.js?v=8.5"></script>
+<script src="app.js?v=8.5.1"></script>
 </body>
 </html>

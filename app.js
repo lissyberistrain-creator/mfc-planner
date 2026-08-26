@@ -2424,85 +2424,295 @@ let validationReport=null;
 let validationOverlayRects=[];
 
 
+
+function optimizerWalkableZone85(z){
+  if(!z || !onLevel(z,'ground'))return false;
+  if(z.name==='Центральный проход')return false; // ЦП — часть маршрута, но не источник.
+  if(z.type==='process')return true;
+  if(['Коридор персонала','Приёмка','Отгрузка','Вход поставщиков','Вход/выход персонала','Эвакуационный выход'].includes(z.name))return true;
+  return /коридор|вход|выход|при[её]м|отгруз/i.test(String(z.name||''));
+}
+function optimizerEntryRects85(){
+  const out=[];
+  (state.zones||[]).forEach(z=>{
+    if(optimizerWalkableZone85(z))out.push({x:z.x,y:z.y,w:z.w,h:z.h,name:z.name});
+  });
+  (state.objects||[]).forEach(o=>{
+    if(!onLevel(o,'ground'))return;
+    if(o.objectKind==='door'||o.name==='Дверь'||/вход|выход|двер/i.test(String(o.name||''))){
+      out.push({x:o.x,y:o.y,w:o.w,h:o.h,name:o.name||'Дверь'});
+    }
+  });
+  return out;
+}
+function optimizerPassageBlockers85(){
+  return rackBlockers().filter(b=>b.name!=='Центральный проход');
+}
+function mergeIntervals85(intervals,min,max){
+  const arr=intervals
+    .map(([a,b])=>[Math.max(min,a),Math.min(max,b)])
+    .filter(([a,b])=>b>a+1e-6)
+    .sort((a,b)=>a[0]-b[0]);
+  const merged=[];
+  arr.forEach(it=>{
+    const last=merged[merged.length-1];
+    if(last&&it[0]<=last[1]+1e-6)last[1]=Math.max(last[1],it[1]);
+    else merged.push([...it]);
+  });
+  return merged;
+}
+function freeSegments85(min,max,blocked){
+  const merged=mergeIntervals85(blocked,min,max);
+  const out=[];let cur=min;
+  merged.forEach(([a,b])=>{
+    if(a>cur+1e-6)out.push([cur,a]);
+    cur=Math.max(cur,b);
+  });
+  if(cur<max-1e-6)out.push([cur,max]);
+  return out;
+}
+function passageEndpointConnections85(rect,orientation){
+  const access=optimizerEntryRects85();
+  const d=Math.max(.35,Math.min(1,Number(state.aisle)||1));
+  let p1,p2;
+  if(orientation==='vertical'){
+    p1={x:rect.x,y:rect.y-d,w:rect.w,h:d};
+    p2={x:rect.x,y:rect.y+rect.h,w:rect.w,h:d};
+  }else{
+    p1={x:rect.x-d,y:rect.y,w:d,h:rect.h};
+    p2={x:rect.x+rect.w,y:rect.y,w:d,h:rect.h};
+  }
+  return [p1,p2].reduce((n,p)=>n+(access.some(a=>rectsOverlap(p,a))?1:0),0);
+}
+function buildCentralPassageRect85(config){
+  if(!config||config.enabled===false)return null;
+  const b=rackCandidateArea();
+  const minWidth=Math.max(.9,Number(state.aisle)||1);
+  const width=clamp(Number(config.width)||minWidth,minWidth,2.6);
+  const position=clamp(config.position??.5,0,1);
+  const blockers=optimizerPassageBlockers85();
+
+  if(config.orientation==='vertical'){
+    const x=b.x+(b.w-width)*position;
+    const strip={x,y:b.y,w:width,h:b.h};
+    const blocked=blockers.filter(r=>rectsOverlap(strip,r)).map(r=>[r.y,r.y+r.h]);
+    const segments=freeSegments85(b.y,b.y+b.h,blocked)
+      .map(([a,c])=>{
+        const rect={x,y:a,w:width,h:c-a};
+        return {rect,connections:passageEndpointConnections85(rect,'vertical')};
+      })
+      .filter(s=>s.rect.h>=Math.max(2,state.aisle*2))
+      .sort((a,c)=>(c.connections*100+c.rect.h)-(a.connections*100+a.rect.h));
+    return segments[0]?.rect||null;
+  }
+
+  const y=b.y+(b.h-width)*position;
+  const strip={x:b.x,y,w:b.w,h:width};
+  const blocked=blockers.filter(r=>rectsOverlap(strip,r)).map(r=>[r.x,r.x+r.w]);
+  const segments=freeSegments85(b.x,b.x+b.w,blocked)
+    .map(([a,c])=>{
+      const rect={x:a,y,w:c-a,h:width};
+      return {rect,connections:passageEndpointConnections85(rect,'horizontal')};
+    })
+    .filter(s=>s.rect.w>=Math.max(2,state.aisle*2))
+    .sort((a,c)=>(c.connections*100+c.rect.w)-(a.connections*100+a.rect.w));
+  return segments[0]?.rect||null;
+}
 function setCentralAisleConfig(config){
   state.zones=(state.zones||[]).filter(z=>z.name!=='Центральный проход');
-  if(!config || config.enabled===false) return;
+  if(!config || config.enabled===false)return null;
 
-  const b=rackCandidateArea();
-  const width=clamp(Number(config.width)||1.2,0.9,2.6);
-  const position=clamp(config.position??.5,0,1);
+  const rect=buildCentralPassageRect85(config);
+  if(!rect)return null;
 
-  if(config.orientation==='horizontal'){
-    const y=b.y+(b.h-width)*position;
-    state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',level:'ground',x:b.x,y,w:b.w,h:width,rotation:0,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
-  }else{
-    const x=b.x+(b.w-width)*position;
-    state.zones.push({name:'Центральный проход',type:'service',zoneRole:'service',level:'ground',x,y:b.y,w:width,h:b.h,rotation:90,affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false});
-  }
-  state.centralAisle=width;
+  const zone={
+    name:'Центральный проход',type:'service',zoneRole:'service',level:'ground',
+    x:rect.x,y:rect.y,w:rect.w,h:rect.h,
+    rotation:config.orientation==='vertical'?90:0,
+    affectsCapacity:true,blocksStorage:true,affectsFlow:true,needsCamera:false
+  };
+  state.zones.push(zone);
+  state.centralAisle=config.orientation==='vertical'?rect.w:rect.h;
+  return zone;
 }
 
 function capacityFromRackPlan(rp){
   const volume=rp.total*state.rackL*state.rackD*state.rackH;
   return volume*1000/Math.max(.1,state.avgSkuL)*state.fillPct/100;
 }
-
 function optimizerFreeArea(rp){
   return Math.max(0,estimatedRackableArea()-(rp.rackArea||0));
 }
+function optimizerNavHardBlocks85(rp){
+  const hard=[];
+  (rp.racks||[]).forEach(r=>hard.push({x:r.x,y:r.y,w:r.w,h:r.h,kind:'rack'}));
 
+  (state.zones||[]).forEach(z=>{
+    if(!onLevel(z,'ground')||z.name==='Хранение'||z.name==='Центральный проход')return;
+    if(optimizerWalkableZone85(z))return;
+    hard.push({x:z.x,y:z.y,w:z.w,h:z.h,kind:'zone'});
+  });
+  (state.columns||[]).forEach(c=>{
+    if(onLevel(c,'ground'))hard.push({x:c.x,y:c.y,w:c.w,h:c.h,kind:'column'});
+  });
+  (state.objects||[]).forEach(o=>{
+    if(!onLevel(o,'ground'))return;
+    if(o.objectKind==='door'||o.objectKind==='camera'||o.name==='Дверь'||o.name==='Ручная камера')return;
+    if(o.type==='process')return;
+    if(o.blocksStorage===false&&o.type!=='equipment')return;
+    hard.push({x:o.x,y:o.y,w:o.w,h:o.h,kind:'object'});
+  });
+  return hard;
+}
+function optimizerPointBlocked85(x,y,hard){
+  return hard.some(r=>x>r.x+1e-6&&x<r.x+r.w-1e-6&&y>r.y+1e-6&&y<r.y+r.h-1e-6);
+}
+function optimizerRouteAccessMetrics85(rp){
+  const aisleCount=(rp.aisles||[]).length;
+  if(!aisleCount)return {accessible:0,total:0,ratio:1,allAccessible:true};
+
+  const step=Math.max(.18,Math.min(.32,(Number(state.aisle)||1)/4));
+  const nx=Math.max(2,Math.ceil(state.roomL/step));
+  const ny=Math.max(2,Math.ceil(state.roomW/step));
+  const hard=optimizerNavHardBlocks85(rp);
+  const entries=optimizerEntryRects85();
+  const totalCells=nx*ny;
+  const walk=new Uint8Array(totalCells);
+  const seen=new Uint8Array(totalCells);
+  const qx=new Int32Array(totalCells);
+  const qy=new Int32Array(totalCells);
+  let qh=0,qt=0;
+
+  const idx=(ix,iy)=>iy*nx+ix;
+  const cellPoint=(ix,iy)=>({x:Math.min(state.roomL-.001,(ix+.5)*step),y:Math.min(state.roomW-.001,(iy+.5)*step)});
+
+  for(let iy=0;iy<ny;iy++){
+    for(let ix=0;ix<nx;ix++){
+      const p=cellPoint(ix,iy);
+      if(p.x>=0&&p.y>=0&&p.x<=state.roomL&&p.y<=state.roomW&&!optimizerPointBlocked85(p.x,p.y,hard)){
+        walk[idx(ix,iy)]=1;
+      }
+    }
+  }
+
+  for(let iy=0;iy<ny;iy++){
+    for(let ix=0;ix<nx;ix++){
+      const k=idx(ix,iy);if(!walk[k])continue;
+      const p=cellPoint(ix,iy);
+      const inEntry=entries.some(r=>p.x>=r.x&&p.x<=r.x+r.w&&p.y>=r.y&&p.y<=r.y+r.h);
+      if(inEntry){
+        seen[k]=1;qx[qt]=ix;qy[qt]=iy;qt++;
+      }
+    }
+  }
+
+  // Если процессных/входных зон нет, используем только реально открытые точки границы.
+  if(qt===0){
+    for(let ix=0;ix<nx;ix++){
+      for(const iy of [0,ny-1]){
+        const k=idx(ix,iy);if(walk[k]&&!seen[k]){seen[k]=1;qx[qt]=ix;qy[qt]=iy;qt++}
+      }
+    }
+    for(let iy=0;iy<ny;iy++){
+      for(const ix of [0,nx-1]){
+        const k=idx(ix,iy);if(walk[k]&&!seen[k]){seen[k]=1;qx[qt]=ix;qy[qt]=iy;qt++}
+      }
+    }
+  }
+
+  while(qh<qt){
+    const ix=qx[qh],iy=qy[qh];qh++;
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const ax=ix+dx,ay=iy+dy;
+      if(ax<0||ay<0||ax>=nx||ay>=ny)continue;
+      const k=idx(ax,ay);
+      if(!walk[k]||seen[k])continue;
+      seen[k]=1;qx[qt]=ax;qy[qt]=ay;qt++;
+    }
+  }
+
+  function rectReachable(r){
+    const x0=Math.max(0,Math.floor(r.x/step)),x1=Math.min(nx-1,Math.ceil((r.x+r.w)/step));
+    const y0=Math.max(0,Math.floor(r.y/step)),y1=Math.min(ny-1,Math.ceil((r.y+r.h)/step));
+    for(let iy=y0;iy<=y1;iy++){
+      for(let ix=x0;ix<=x1;ix++){
+        const k=idx(ix,iy);if(!seen[k])continue;
+        const p=cellPoint(ix,iy);
+        if(p.x>=r.x-1e-6&&p.x<=r.x+r.w+1e-6&&p.y>=r.y-1e-6&&p.y<=r.y+r.h+1e-6)return true;
+      }
+    }
+    return false;
+  }
+
+  let accessible=0;
+  (rp.aisles||[]).forEach(a=>{if(rectReachable(a))accessible++});
+  return {
+    accessible,total:aisleCount,
+    ratio:aisleCount?accessible/aisleCount:1,
+    allAccessible:accessible===aisleCount
+  };
+}
+function optimizerCPPerpendicular85(rp,config){
+  if(!config||config.enabled===false)return true;
+  return (rp.orientation==='horizontal'&&config.orientation==='vertical')||
+    (rp.orientation==='vertical'&&config.orientation==='horizontal');
+}
 function evaluateLayoutCandidate(base,config,label){
   state=JSON.parse(JSON.stringify(base));
   sanitizeState();migrateSmartZones();migrateV69();
-  setCentralAisleConfig(config);
 
+  const cp=setCentralAisleConfig(config);
   const rp=rackPlan();
+  const nav=optimizerRouteAccessMetrics85(rp);
   const capacity=capacityFromRackPlan(rp);
   const free=optimizerFreeArea(rp);
 
+  const cpPerpendicular=optimizerCPPerpendicular85(rp,config);
+  const cpExists=!config||config.enabled===false||!!cp;
+  const cpConnections=cp?passageEndpointConnections85(cp,config.orientation):0;
+  const validAccess=nav.allAccessible&&cpPerpendicular&&cpExists;
+
   let centrality=0,crossAccess=0,aisleScore=0;
-  if(config && config.enabled!==false){
+  if(config && config.enabled!==false && cp){
     centrality=1-Math.min(1,Math.abs((config.position??.5)-.5)*2);
-    crossAccess=1;
-    aisleScore=Math.min(1,(config.width||1)/1.6);
+    crossAccess=cpPerpendicular?1:0;
+    aisleScore=Math.min(1,(config.width||1)/Math.max(1.2,state.aisle));
   }
 
   return {
     id:'v_'+Math.random().toString(36).slice(2,10),
     label,
     config:config?JSON.parse(JSON.stringify(config)):{enabled:false},
-    sections:rp.total,
-    streets:rp.streetCount||0,
-    capacity,free,
-    rackArea:rp.rackArea||0,
-    orientation:rp.orientation,
+    sections:rp.total,streets:rp.streetCount||0,aisles:rp.aisleCount||0,
+    accessibleAisles:nav.accessible,accessRatio:nav.ratio,validAccess,
+    cpPerpendicular,cpConnections,
+    capacity,free,rackArea:rp.rackArea||0,orientation:rp.orientation,
     centrality,crossAccess,aisleScore,
+    cpRect:cp?{x:cp.x,y:cp.y,w:cp.w,h:cp.h}:null,
     racks:(rp.racks||[]).map(r=>({x:r.x,y:r.y,w:r.w,h:r.h})),
     snapshot:JSON.parse(JSON.stringify(state))
   };
 }
-
 function optimizerCurrentPlanMetrics(){
   const rp=rackPlan();
+  const nav=optimizerRouteAccessMetrics85(rp);
   return {
-    sections:rp.total,
-    capacity:capacityFromRackPlan(rp),
-    free:optimizerFreeArea(rp),
-    rackArea:rp.rackArea||0,
-    streets:rp.streetCount||0,
+    sections:rp.total,capacity:capacityFromRackPlan(rp),free:optimizerFreeArea(rp),
+    rackArea:rp.rackArea||0,streets:rp.streetCount||0,aisles:rp.aisleCount||0,
+    accessibleAisles:nav.accessible,accessRatio:nav.ratio,
     racks:(rp.racks||[]).map(r=>({x:r.x,y:r.y,w:r.w,h:r.h}))
   };
 }
-
 function candidateScore(v,goal,n){
+  if(!v.validAccess)return -1e9;
   const sections=v.sections/n.maxSections;
   const used=1-(v.free/n.maxFree);
   const streets=Math.min(1,v.streets/n.maxStreets);
-  if(goal==='flow') return v.crossAccess*35+v.centrality*25+v.aisleScore*15+sections*15+streets*10;
-  if(goal==='balanced') return sections*58+v.crossAccess*14+v.centrality*13+used*10+streets*5;
-  return sections*90+used*7+streets*3;
+  const access=v.accessRatio;
+  if(goal==='flow')return access*35+v.crossAccess*25+v.centrality*15+v.aisleScore*10+sections*10+streets*5;
+  if(goal==='balanced')return access*25+sections*45+v.crossAccess*12+v.centrality*8+used*7+streets*3;
+  return access*20+sections*72+used*5+streets*3;
 }
-
 function findBestVariants(){
   const original=JSON.parse(JSON.stringify(state));
   optimizerBaseState=JSON.parse(JSON.stringify(state));
@@ -2512,8 +2722,11 @@ function findBestVariants(){
   const candidates=[];
   candidates.push(evaluateLayoutCandidate(optimizerBaseState,{enabled:false},'Без ЦП'));
 
-  const widths=[1.0,1.2,1.4,1.6,1.8];
-  const positions=[.20,.30,.40,.50,.60,.70,.80];
+  const minW=Math.max(1,Number(state.aisle)||1);
+  const widths=[minW,minW+.2,minW+.4,Math.max(1.6,minW),Math.max(1.8,minW)]
+    .map(v=>Math.min(2.6,Math.round(v*10)/10))
+    .filter((v,i,a)=>a.indexOf(v)===i);
+  const positions=[.15,.25,.35,.45,.50,.55,.65,.75,.85];
 
   ['vertical','horizontal'].forEach(orientation=>{
     widths.forEach(width=>positions.forEach(position=>{
@@ -2528,10 +2741,12 @@ function findBestVariants(){
   optimizerAllCandidates=candidates;
   optimizerSearchCount=candidates.length*8;
 
+  const valid=candidates.filter(v=>v.validAccess);
+  const scorePool=valid.length?valid:candidates;
   const n={
-    maxSections:Math.max(1,...candidates.map(v=>v.sections)),
-    maxFree:Math.max(1,...candidates.map(v=>v.free)),
-    maxStreets:Math.max(1,...candidates.map(v=>v.streets))
+    maxSections:Math.max(1,...scorePool.map(v=>v.sections)),
+    maxFree:Math.max(1,...scorePool.map(v=>v.free)),
+    maxStreets:Math.max(1,...scorePool.map(v=>v.streets))
   };
 
   const goal=$('optimizerGoal')?.value||'capacity';
@@ -2543,10 +2758,10 @@ function findBestVariants(){
   });
 
   const seen=new Set(),unique=[];
-  [...candidates]
+  [...valid]
     .sort((a,b)=>b.score-a.score||b.sections-a.sections||a.free-b.free)
     .forEach(v=>{
-      const key=[v.sections,v.streets,Math.round(v.free*10),v.orientation,
+      const key=[v.sections,v.streets,v.aisles,Math.round(v.free*10),v.orientation,
         v.config.enabled===false?'none':v.config.orientation,
         v.config.enabled===false?0:Math.round((v.config.width||0)*10),
         v.config.enabled===false?0:Math.round((v.config.position||0)*100)].join('|');
@@ -2559,14 +2774,19 @@ function findBestVariants(){
   sanitizeState();migrateSmartZones();migrateV69();
   renderVariantSelector();
   renderAll();
-}
 
+  if(!optimizerVariants.length&&$('optimizerStats')){
+    $('optimizerStats').innerHTML=`<b>Безопасный вариант не найден</b>
+      <span>Проверено ${fmt(optimizerSearchCount)} раскладок, но ни одна не дала маршрут ко всем рабочим проходам.</span>
+      <span>Проверь входы, процессные зоны, ширину проходов и препятствия.</span>`;
+  }
+}
 function renderVariantSelector(){
   const sel=$('variantSelect'),box=$('variantDetails'),stats=$('optimizerStats');
   if(!sel||!box)return;
   if(!optimizerVariants.length){
     sel.innerHTML='<option value="">Сначала нажми «Найти ТОП-10»</option>';
-    box.innerHTML='<div class="hint">Проверим сотни внутренних раскладок.</div>';
+    box.innerHTML='<div class="hint">В ТОП попадут только варианты с доступом ко всем улицам.</div>';
     if(stats)stats.innerHTML='<span>Поиск ещё не запускался</span>';
     return;
   }
@@ -2577,38 +2797,36 @@ function renderVariantSelector(){
   }).join('');
 
   if(stats){
-    const best=Math.max(...optimizerAllCandidates.map(v=>v.sections));
+    const best=Math.max(...optimizerVariants.map(v=>v.sections));
     const delta=best-(optimizerCurrentMetrics?.sections||0);
+    const validCount=optimizerAllCandidates.filter(v=>v.validAccess).length;
     stats.innerHTML=`<b>Проверено ${fmt(optimizerSearchCount)} внутренних раскладок</b>
-      <span>Текущий план: ${fmt(optimizerCurrentMetrics?.sections||0)} секций</span>
-      <span>Максимум: ${fmt(best)} секций ${delta>0?`(+${fmt(delta)})`:'(текущий уже максимум)'}</span>`;
+      <span>Физически доступных сценариев: ${fmt(validCount)} из ${fmt(optimizerAllCandidates.length)}</span>
+      <span>Текущий план: ${fmt(optimizerCurrentMetrics?.sections||0)} секций · доступ ${fmt(optimizerCurrentMetrics?.accessibleAisles||0)}/${fmt(optimizerCurrentMetrics?.aisles||0)} проходов</span>
+      <span>Лучший доступный: ${fmt(best)} секций ${delta>0?`(+${fmt(delta)})`:''}</span>`;
   }
   showVariantDetails(0);
 }
-
 function selectedOptimizerVariant(){
   return optimizerVariants[Number($('variantSelect')?.value)];
 }
-
 function showVariantDetails(index){
   optimizerPreviewRacks=[];
   const v=optimizerVariants[Number(index)],box=$('variantDetails');
   if(!v||!box)return;
-  const cp=v.config.enabled===false?'без ЦП':`${v.config.orientation==='vertical'?'вертикальный':'горизонтальный'} ЦП ${fmt1(v.config.width)} м · ${Math.round((v.config.position||0)*100)}%`;
+  const cp=v.config.enabled===false?'без ЦП':`${v.config.orientation==='vertical'?'вертикальный':'горизонтальный'} ЦП ${fmt1(v.config.width)} м`;
   box.innerHTML=`<div class="variant-kpis">
     <div><span>Секции</span><b>${fmt(v.sections)}</b><small>${v.deltaSections>0?'+'+fmt(v.deltaSections):fmt(v.deltaSections)} к текущему</small></div>
     <div><span>Вместимость</span><b>${fmt(v.capacity)} ШК</b><small>${v.deltaCapacity>0?'+'+fmt(v.deltaCapacity):fmt(v.deltaCapacity)} ШК</small></div>
     <div><span>Улицы</span><b>${fmt(v.streets)}</b></div>
+    <div><span>Доступ к проходам</span><b>${fmt(v.accessibleAisles)}/${fmt(v.aisles)}</b></div>
     <div><span>Свободный остаток</span><b>${fmt1(v.free)} м²</b></div>
-    <div><span>Доп. footprint</span><b>${fmt1(v.extraRackArea)} м²</b></div>
     <div><span>Рейтинг</span><b>${fmt1(v.score)}/100</b></div>
-  </div><div class="hint">${cp} · улицы ${v.orientation==='horizontal'?'продольные':'поперечные'}</div>`;
+  </div><div class="hint">${cp} · стеллажные улицы ${v.orientation==='horizontal'?'продольные':'поперечные'} · ЦП ${v.config.enabled===false?'не требуется':v.cpPerpendicular?'поперёк улиц':'ошибка ориентации'}</div>`;
 }
-
 function rackKey(r){
   return [Math.round(r.x*100),Math.round(r.y*100),Math.round(r.w*100),Math.round(r.h*100)].join('|');
 }
-
 function previewSelectedVariant(){
   const v=selectedOptimizerVariant();
   if(!v)return alert('Сначала найди и выбери вариант.');
@@ -2616,14 +2834,13 @@ function previewSelectedVariant(){
   const keys=new Set((current.racks||[]).map(rackKey));
   optimizerPreviewRacks=(v.racks||[]).filter(r=>!keys.has(rackKey(r))).map(r=>({...r}));
   draw();
-  if($('projectSaveStatus'))$('projectSaveStatus').textContent=optimizerPreviewRacks.length
-    ?`Зелёным показано ${optimizerPreviewRacks.length} дополнительных секций.`
-    :'Дополнительных секций относительно текущего плана нет.';
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent=
+    `Предпросмотр: ${fmt(v.accessibleAisles)}/${fmt(v.aisles)} рабочих проходов имеют маршрут.`;
 }
-
 function applySelectedVariant(){
   const v=selectedOptimizerVariant();
   if(!v)return alert('Сначала найди и выбери вариант.');
+  if(!v.validAccess)return alert('Этот вариант не прошёл проверку доступности улиц.');
   optimizerPreviewRacks=[];
   state=JSON.parse(JSON.stringify(v.snapshot));
   sanitizeState();migrateSmartZones();migrateV69();
@@ -2631,13 +2848,15 @@ function applySelectedVariant(){
   if($('layoutMode'))$('layoutMode').value=state.layoutMode;
   selected={kind:null,index:null};
   renderAll();
-  if($('projectSaveStatus'))$('projectSaveStatus').textContent=`Применён вариант #${v.rank}.`;
+  const after=optimizerRouteAccessMetrics85(rackPlan());
+  if($('projectSaveStatus'))$('projectSaveStatus').textContent=
+    `Применён вариант #${v.rank}: доступ ${fmt(after.accessible)}/${fmt(after.total)} рабочих проходов.`;
 }
-
 function fillStorageToMaximum(){
   if(!optimizerAllCandidates.length)findBestVariants();
-  const max=[...optimizerAllCandidates].sort((a,b)=>b.sections-a.sections||a.free-b.free)[0];
-  if(!max)return alert('Не удалось подобрать вариант.');
+  const valid=optimizerAllCandidates.filter(v=>v.validAccess);
+  const max=[...valid].sort((a,b)=>b.sections-a.sections||a.free-b.free)[0];
+  if(!max)return alert('Не найден вариант, где все рабочие проходы доступны.');
   const before=optimizerCurrentMetrics?.sections??rackPlan().total;
   optimizerPreviewRacks=[];
   state=JSON.parse(JSON.stringify(max.snapshot));
@@ -2649,7 +2868,8 @@ function fillStorageToMaximum(){
   renderAll();
   if($('projectSaveStatus')){
     const delta=max.sections-before;
-    $('projectSaveStatus').textContent=delta>0?`Хранение дозаполнено: +${fmt(delta)} секций.`:'Текущий план уже соответствует максимуму.';
+    $('projectSaveStatus').textContent=
+      `${delta>0?'Хранение дозаполнено: +'+fmt(delta)+' секций.':'Текущий план уже максимум.'} Все рабочие проходы доступны.`;
   }
 }
 
@@ -3560,7 +3780,7 @@ $('resetBtn').onclick=()=>{if(confirm('Сбросить текущий план?
 $('exportPdfBtn').onclick=exportProjectPdf;
 $('exportExcelBtn').onclick=exportProjectExcel;
 $('exportPngBtn').onclick=exportPlanPng;
-$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v8.5.json';a.click();URL.revokeObjectURL(a.href)};
+$('exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='mfc-planner-v8.5.1.json';a.click();URL.revokeObjectURL(a.href)};
 $('importInput').onchange=async e=>{try{state=Object.assign(structuredClone(defaults),JSON.parse(await e.target.files[0].text()));sanitizeState();migrateSmartZones();migrateV69();selected={kind:null};inputIds.forEach(id=>{if($(id))$(id).value=state[id]});$('layoutMode').value=state.layoutMode;if($('turnoverMode'))$('turnoverMode').value=state.turnoverMode;renderAll()}catch{alert('Не удалось загрузить проект')}}; 
 document.querySelectorAll('.tool[data-mode]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool[data-mode]').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;draw()});
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabcontent').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('tab-'+b.dataset.tab).classList.add('active')});
